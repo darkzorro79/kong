@@ -220,9 +220,12 @@ Issues and feature requests are welcome via [GitHub Issues](https://github.com/a
 
 Also, don't hesitate to reach out to me on [X](https://x.com/0xamruth) or [LinkedIn](https://www.linkedin.com/in/amruthn/)!
 
+
+Fear the monkey.
+
 ---
 
 <p align="center">
   <img src="./assets/kong-logo.png" width="40" alt="Kong"> <br />
-  <b>Kong</b>: world's first AI reverse engineer 
+  <b>Kong</b>: The world's first AI reverse engineer 
 </p>
