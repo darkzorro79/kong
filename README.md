@@ -89,9 +89,9 @@ Kong uses a five-phase pipeline orchestrated by a supervisor that coordinates tr
 
 **Triage** enumerates all functions in the binary, classifies them by size (trivial / small / medium / large), builds the call graph, detects the source language, and runs signature matching against known standard library and crypto functions. Functions matched by signature are marked as resolved and skip LLM analysis entirely.
 
-**Analysis** processes functions in bottom-up order from the call graph using a work queue. For each function, Kong builds a context window from Ghidra's program database — decompilation, cross-references, string references, and the signatures of already-analyzed callees — normalizes the decompiler output, and sends it to the LLM for name, type, and parameter recovery. Results are written back to Ghidra immediately so downstream callers see updated names.
+**Analysis** processes functions in bottom-up order from the call graph using a work queue. For each function, Kong builds a context window from Ghidra's program database — decompilation, cross-references, string references, and the signatures of already-analyzed callees — normalizes the decompiler output, and sends it to the LLM for name, type, and parameter recovery. If obfuscation is detected in a function's decompilation, Kong runs an agentic deobfuscation pass with symbolic tool access before producing the analysis. Results are written back to Ghidra immediately so downstream callers see updated names.
 
-**Cleanup** normalizes the raw LLM output, deduplicates results, and resolves conflicts where multiple analysis passes produced different names for the same entity. Here, Kong performs a deobfuscation pass to remove obfuscation techniques from the decompiler output.
+**Cleanup** unifies struct types from proposals accumulated during analysis and retries any function signatures that failed to apply during the analysis pass.
 
 **Synthesis** takes a global view across all analyzed functions. A single LLM call reviews the most-connected functions, unifies naming conventions, synthesizes struct definitions from field access patterns, and refines names that look inconsistent in the broader context.
 
@@ -218,7 +218,7 @@ This license is compatible with the Ghidra license, and allows for commercial us
 
 Issues and feature requests are welcome via [GitHub Issues](https://github.com/amruth-sn/kong/issues).
 
-Also, don't hesitate to reach out to me on [X](https://x.com/0xamruth) or [LinkedIn](https://www.linkedin.com/in/amruthn/).
+Also, don't hesitate to reach out to me on [X](https://x.com/0xamruth) or [LinkedIn](https://www.linkedin.com/in/amruthn/)!
 
 ---
 
