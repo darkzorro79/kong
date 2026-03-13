@@ -37,7 +37,7 @@ Repository = "https://github.com/amruth-sn/kong"
 Issues = "https://github.com/amruth-sn/kong/issues"
 
 [project.scripts]
-kong-re = "kong-re.__main__:cli"
+kong-re = "kong.__main__:cli"
 
 [project.optional-dependencies]
 dev = [
@@ -48,6 +48,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kong"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
