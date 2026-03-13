@@ -87,21 +87,21 @@ class TestGlobalExtraction:
             0x402000: SAMPLE_DECOMP_B,
         }
         synth = SemanticSynthesizer(FakeLLMClient())
-        result = synth._extract_globals(decompilations)
+        globals_map, xref_counts = synth._extract_globals(decompilations)
 
-        assert "DAT_100008000" in result
-        assert result["DAT_100008000"] == {0x401000, 0x402000}
+        assert "DAT_100008000" in globals_map
+        assert globals_map["DAT_100008000"] == {0x401000, 0x402000}
 
-        assert "DAT_100004000" in result
-        assert result["DAT_100004000"] == {0x401000}
+        assert "DAT_100004000" in globals_map
+        assert globals_map["DAT_100004000"] == {0x401000}
 
     def test_no_globals_when_none_present(self) -> None:
         decompilations = {
             0x401000: SAMPLE_DECOMP_NO_GLOBALS,
         }
         synth = SemanticSynthesizer(FakeLLMClient())
-        result = synth._extract_globals(decompilations)
-        assert result == {}
+        globals_map, xref_counts = synth._extract_globals(decompilations)
+        assert globals_map == {}
 
 
 class TestPromptBuilding:
@@ -179,6 +179,35 @@ Trailing text'''
         assert result.globals == {"DAT_100008000": "g_flag"}
         assert result.structs == []
         assert result.name_refinements == {}
+
+
+class TestSynthesisCap:
+    def test_synthesis_caps_at_50_functions(self) -> None:
+        from kong.synthesis.semantic import SYNTHESIS_FUNCTION_CAP
+
+        results = [_make_result(i, f"func_{i}") for i in range(100)]
+        decomps = {i: f"void func_{i}(void) {{ DAT_1000 = 1; }}" for i in range(100)}
+
+        synth = SemanticSynthesizer(FakeLLMClient())
+        prompt = synth._build_synthesis_prompt(results, decomps)
+
+        func_count = prompt.count("### func_")
+        assert func_count <= SYNTHESIS_FUNCTION_CAP
+
+    def test_prioritizes_functions_with_most_xrefs(self) -> None:
+        results = [_make_result(i, f"func_{i}") for i in range(60)]
+        decomps = {}
+        for i in range(60):
+            if i < 5:
+                decomps[i] = f"void func_{i}(void) {{ DAT_A = 1; DAT_B = 2; DAT_C = 3; }}"
+            else:
+                decomps[i] = f"void func_{i}(void) {{ return; }}"
+
+        synth = SemanticSynthesizer(FakeLLMClient())
+        prompt = synth._build_synthesis_prompt(results, decomps)
+
+        for i in range(5):
+            assert f"func_{i}" in prompt
 
 
 class TestGlobalApplication:

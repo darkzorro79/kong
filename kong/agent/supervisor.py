@@ -7,10 +7,10 @@ Emits structured events for TUI/CLI consumption.
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from kong.agent.analyzer import Analyzer, LLMClient, LLMResponse
+from kong.agent.analyzer import Analyzer, LLMClient
 from kong.agent.deobfuscator import Deobfuscator, classify_obfuscation
 from kong.agent.events import Event, EventCallback, EventType, Phase
 from kong.agent.models import AnalysisStats, FunctionResult
@@ -23,17 +23,17 @@ from kong.export.source import ExportData, export_source
 from kong.export.structured import export_json
 from kong.ghidra.client import GhidraClient
 from kong.ghidra.types import BinaryInfo, FunctionInfo, StringEntry
-from kong.llm.client import TokenUsage
+from kong.llm.usage import TokenUsage
 from kong.normalizer.syntactic import normalize
 from kong.synthesis.semantic import SemanticSynthesizer, SynthesisResult
 
 logger = logging.getLogger(__name__)
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-20250514"
-
-MAX_PARALLEL_LLM = 4
-REQUEST_STAGGER_SECONDS = 0.5
+OPUS_MODEL = "claude-opus-4-6"
+MAX_INPUT_TOKENS = 180_000
+MAX_CHUNK_FUNCTIONS = 120
+CHARS_PER_TOKEN = 4
+PER_FUNCTION_OVERHEAD_CHARS = 60
 
 
 class Supervisor:
@@ -67,6 +67,15 @@ class Supervisor:
         self._synthesis_result: SynthesisResult | None = None
         self._listeners: list[EventCallback] = []
         self._paused: bool = False
+        self._resume_event = threading.Event()
+        self._resume_event.set()
+        self._decompilation_cache: dict[int, str] = {}
+        self._functions_by_addr: dict[int, FunctionInfo] = {}
+
+    def _get_decompilation(self, addr: int) -> str:
+        if addr not in self._decompilation_cache:
+            self._decompilation_cache[addr] = self.client.get_decompilation(addr)
+        return self._decompilation_cache[addr]
 
     def on_event(self, callback: EventCallback) -> None:
         """Register an event listener."""
@@ -82,9 +91,15 @@ class Supervisor:
 
     def pause(self) -> None:
         self._paused = True
+        self._resume_event.clear()
 
     def resume(self) -> None:
         self._paused = False
+        self._resume_event.set()
+
+    def _wait_if_paused(self) -> None:
+        """Block until resumed. No-op if not paused."""
+        self._resume_event.wait()
 
     def export(self) -> None:
         """Trigger export manually (e.g. from TUI keybind)."""
@@ -135,9 +150,9 @@ class Supervisor:
         result = triage.run()
         self.triage_result = result
 
-        # propagate triage results to supervisor state
         self.binary_info = result.binary_info
         self.functions = result.functions
+        self._functions_by_addr = {f.address: f for f in self.functions}
         self.strings = result.strings
         self.queue = result.queue
         self.stats.total_functions = result.queue_size
@@ -191,127 +206,62 @@ class Supervisor:
             ),
         ))
 
-
     def _run_analysis(self) -> None:
-        """Analyze functions bottom-up via LLM, parallelized within each depth level."""
+        """Analyze functions in large chunks via sequential LLM calls."""
         self._emit(Event(
             type=EventType.PHASE_START,
             phase=Phase.ANALYSIS,
-            message="Starting bottom-up analysis...",
+            message="Starting analysis...",
         ))
 
-        depth_batches = self.queue.items_by_depth()
+        all_items = self.queue.all_items()
+        chunk_items: list[tuple[WorkItem, str]] = []
+        sequential_items: list[WorkItem] = []
         completed_count = 0
 
-        for batch in depth_batches:
-            if self._paused:
-                time.sleep(0.1)
+        for item in all_items:
+            func = item.function
+
+            if func.classification and func.classification.value == "trivial":
+                result = FunctionResult(
+                    address=func.address,
+                    original_name=func.name,
+                    skipped=True,
+                    skip_reason="trivial",
+                )
+                self.results[func.address] = result
+                self.stats.record_result(result)
+                completed_count += 1
                 continue
 
-            parallel_items: list[tuple[WorkItem, str, str]] = []
-            sequential_items: list[WorkItem] = []
-            analyzer = Analyzer(self.client, self.llm_client) if self.llm_client else None
-
-            for item in batch:
-                func = item.function
-
-                if func.classification and func.classification.value == "trivial":
-                    result = FunctionResult(
-                        address=func.address,
-                        original_name=func.name,
-                        skipped=True,
-                        skip_reason="trivial",
-                    )
-                    self.results[func.address] = result
-                    self.stats.record_result(result)
-                    completed_count += 1
-                    continue
-
-                if analyzer is None:
-                    result = FunctionResult(
-                        address=func.address,
-                        original_name=func.name,
-                        name=func.name,
-                        confidence=0,
-                    )
-                    self.results[func.address] = result
-                    self.stats.record_result(result)
-                    completed_count += 1
-                    continue
-
-                decompilation = self.client.get_decompilation(func.address)
-                techniques = classify_obfuscation(decompilation)
-
-                if techniques:
-                    sequential_items.append(item)
-                    continue
-
-                model = self._pick_model(item, decompilation)
-                context = analyzer._build_context(
-                    item, self.binary_info, self.results, self.strings,
+            if self.llm_client is None:
+                result = FunctionResult(
+                    address=func.address,
+                    original_name=func.name,
+                    name=func.name,
+                    confidence=0,
                 )
-                prompt = analyzer._build_prompt(context)
-                parallel_items.append((item, prompt, model))
-
-            if parallel_items:
-                self._analyze_parallel(parallel_items, completed_count)
-                completed_count += len(parallel_items)
-
-            for item in sequential_items:
+                self.results[func.address] = result
+                self.stats.record_result(result)
                 completed_count += 1
-                func = item.function
-                self._emit(Event(
-                    type=EventType.FUNCTION_START,
-                    phase=Phase.ANALYSIS,
-                    message=f"Analyzing {func.name} ({func.address_hex})...",
-                    data={
-                        "address": func.address,
-                        "name": func.name,
-                        "size": func.size,
-                        "depth": item.depth,
-                        "progress": f"{completed_count}/{self.queue.total}",
-                    },
-                ))
-                try:
-                    result = self._analyze_function_sequential(item)
-                except Exception as e:
-                    result = FunctionResult(
-                        address=func.address,
-                        original_name=func.name,
-                        error=str(e),
-                    )
-                    self._emit(Event(
-                        type=EventType.FUNCTION_ERROR,
-                        phase=Phase.ANALYSIS,
-                        message=f"Error analyzing {func.name}: {e}",
-                        data={"address": func.address, "error": str(e)},
-                    ))
-                self._record_analysis_result(func, result)
+                continue
 
-        self._emit(Event(
-            type=EventType.PHASE_COMPLETE,
-            phase=Phase.ANALYSIS,
-            message=(
-                f"Analysis complete. {self.stats.named}/{self.stats.total_functions} "
-                f"functions named."
-            ),
-        ))
+            decompilation = self._get_decompilation(func.address)
+            techniques = classify_obfuscation(decompilation)
 
-    def _pick_model(self, item: WorkItem, decompilation: str) -> str:
-        """Choose Haiku for small/simple functions, Sonnet for complex ones."""
-        line_count = decompilation.count("\n")
-        # TODO: calibrate — thresholds are initial guesses, need eval data to tune.
-        if item.function.size <= 200 and len(item.callees) <= 2 and line_count <= 30:
-            return HAIKU_MODEL
-        return SONNET_MODEL
+            if techniques:
+                sequential_items.append(item)
+                continue
 
-    def _analyze_parallel(
-        self,
-        items: list[tuple[WorkItem, str, str]],
-        completed_base: int,
-    ) -> None:
-        """Send LLM calls in parallel for a batch of non-obfuscated functions."""
-        for idx, (item, _, model) in enumerate(items):
+            chunk_items.append((item, normalize(decompilation)))
+
+        if chunk_items:
+            self._analyze_chunks(chunk_items, completed_count)
+            completed_count += len(chunk_items)
+
+        for item in sequential_items:
+            self._wait_if_paused()
+            completed_count += 1
             func = item.function
             self._emit(Event(
                 type=EventType.FUNCTION_START,
@@ -322,30 +272,165 @@ class Supervisor:
                     "name": func.name,
                     "size": func.size,
                     "depth": item.depth,
-                    "model": model.split("-")[1] if "-" in model else model,
-                    "progress": f"{completed_base + idx + 1}/{self.queue.total}",
+                    "progress": f"{completed_count}/{self.queue.total}",
                 },
             ))
+            try:
+                result = self._analyze_function_sequential(item)
+            except Exception as e:
+                result = FunctionResult(
+                    address=func.address,
+                    original_name=func.name,
+                    error=str(e),
+                )
+                self._emit(Event(
+                    type=EventType.FUNCTION_ERROR,
+                    phase=Phase.ANALYSIS,
+                    message=f"Error analyzing {func.name}: {e}",
+                    data={"address": func.address, "error": str(e)},
+                ))
+            self._record_analysis_result(func, result)
 
-        def _call_llm(prompt: str, model: str) -> LLMResponse:
-            assert self.llm_client is not None
-            return self.llm_client.analyze_function(prompt, model=model)
+        self._emit(Event(
+            type=EventType.PHASE_COMPLETE,
+            phase=Phase.ANALYSIS,
+            message=(
+                f"Analysis complete. {self.stats.named}/{self.stats.total_functions} "
+                f"functions named."
+            ),
+        ))
 
-        futures_map: dict[object, WorkItem] = {}
+    def _estimate_overhead_tokens(self) -> int:
+        """Estimate token overhead from system prompt, known-functions list, and headers."""
+        overhead_chars = 2000  # system prompt + batch schema + binary header
 
-        with ThreadPoolExecutor(max_workers=MAX_PARALLEL_LLM) as executor:
-            for i, (item, prompt, model) in enumerate(items):
-                if i > 0 and i % MAX_PARALLEL_LLM == 0:
-                    time.sleep(REQUEST_STAGGER_SECONDS)
-                future = executor.submit(_call_llm, prompt, model)
-                futures_map[future] = item
+        known = {
+            addr: r.name
+            for addr, r in self.results.items()
+            if r.name and not r.skipped and not r.error
+        }
+        if known:
+            overhead_chars += sum(
+                len(f"- 0x{addr:08x}: {name}\n") for addr, name in known.items()
+            )
+            overhead_chars += 40  # section header
 
-            for future in as_completed(futures_map):
-                item = futures_map[future]
+        return overhead_chars // CHARS_PER_TOKEN
+
+    def _split_into_chunks(
+        self,
+        items: list[tuple[WorkItem, str]],
+    ) -> list[list[tuple[WorkItem, str]]]:
+        """Split items into chunks that fit within the input token budget."""
+        overhead_tokens = self._estimate_overhead_tokens()
+        budget = MAX_INPUT_TOKENS - overhead_tokens
+
+        chunks: list[list[tuple[WorkItem, str]]] = []
+        current_chunk: list[tuple[WorkItem, str]] = []
+        current_tokens = 0
+
+        for item, decomp in items:
+            est_tokens = (len(decomp) + PER_FUNCTION_OVERHEAD_CHARS) // CHARS_PER_TOKEN
+            chunk_full = (
+                current_tokens + est_tokens > budget
+                or len(current_chunk) >= MAX_CHUNK_FUNCTIONS
+            )
+            if current_chunk and chunk_full:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_tokens = 0
+            current_chunk.append((item, decomp))
+            current_tokens += est_tokens
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+
+    def _analyze_chunks(
+        self,
+        items: list[tuple[WorkItem, str]],
+        completed_base: int,
+    ) -> None:
+        """Analyze functions in large chunks, streaming results per chunk."""
+        assert self.llm_client is not None
+        assert self.binary_info is not None
+
+        items.sort(key=lambda x: len(x[1]))
+
+        analyzer = Analyzer(self.client, self.llm_client)
+        chunks = self._split_into_chunks(items)
+        total_chunks = len(chunks)
+        overhead = self._estimate_overhead_tokens()
+        logger.info(
+            "Split %d functions into %d chunks (overhead ~%dK tokens, budget ~%dK tokens).",
+            len(items), total_chunks, overhead // 1000, (MAX_INPUT_TOKENS - overhead) // 1000,
+        )
+        processed = 0
+
+        for chunk_num, chunk in enumerate(chunks, start=1):
+
+            for idx, (item, _) in enumerate(chunk):
                 func = item.function
-                try:
-                    response = future.result()
-                    sig_applied = self._write_back_response(func.address, response)
+                self._emit(Event(
+                    type=EventType.FUNCTION_START,
+                    phase=Phase.ANALYSIS,
+                    message=f"Analyzing {func.name} ({func.address_hex})...",
+                    data={
+                        "address": func.address,
+                        "name": func.name,
+                        "size": func.size,
+                        "depth": item.depth,
+                        "progress": f"{completed_base + processed + idx + 1}/{self.queue.total}",
+                    },
+                ))
+
+            self._wait_if_paused()
+
+            logger.info(
+                "Sending chunk %d/%d (%d functions) to LLM...",
+                chunk_num, total_chunks, len(chunk),
+            )
+
+            prompt = self._build_chunk_prompt(chunk)
+
+            try:
+                responses = self.llm_client.analyze_function_batch(
+                    prompt, model=OPUS_MODEL,
+                )
+            except Exception as e:
+                logger.warning("Chunk %d/%d failed: %s", chunk_num, total_chunks, e)
+                for item, _ in chunk:
+                    func = item.function
+                    result = FunctionResult(
+                        address=func.address,
+                        original_name=func.name,
+                        error=f"Chunk call failed: {e}",
+                    )
+                    self._emit(Event(
+                        type=EventType.FUNCTION_ERROR,
+                        phase=Phase.ANALYSIS,
+                        message=f"Error analyzing {func.name}: {e}",
+                        data={"address": func.address, "error": str(e)},
+                    ))
+                    self._record_analysis_result(func, result)
+                continue
+
+            by_addr = {r.address: r for r in responses if r.address}
+
+            logger.info(
+                "Chunk %d/%d: LLM returned %d responses, %d with valid addresses "
+                "(chunk has %d functions).",
+                chunk_num, total_chunks, len(responses), len(by_addr), len(chunk),
+            )
+
+            matched = 0
+            for item, _ in chunk:
+                func = item.function
+                response = by_addr.get(func.address)
+
+                if response and response.name:
+                    sig_applied = analyzer._write_back(func.address, response)
                     result = FunctionResult(
                         address=func.address,
                         original_name=func.name,
@@ -359,20 +444,63 @@ class Supervisor:
                         signature_applied=sig_applied,
                         struct_proposals=response.struct_proposals,
                     )
-                except Exception as e:
+                    matched += 1
+                else:
+                    reason = "No matching response from LLM"
+                    if response:
+                        reason = response.reasoning or "Empty name in response"
                     result = FunctionResult(
                         address=func.address,
                         original_name=func.name,
-                        error=str(e),
+                        error=reason,
                     )
                     self._emit(Event(
                         type=EventType.FUNCTION_ERROR,
                         phase=Phase.ANALYSIS,
-                        message=f"Error analyzing {func.name}: {e}",
-                        data={"address": func.address, "error": str(e)},
+                        message=f"No analysis for {func.name}",
+                        data={"address": func.address, "error": reason},
                     ))
 
                 self._record_analysis_result(func, result)
+
+            logger.info(
+                "Chunk %d/%d complete: %d/%d functions matched.",
+                chunk_num, total_chunks, matched, len(chunk),
+            )
+            processed += len(chunk)
+
+    def _build_chunk_prompt(self, items: list[tuple[WorkItem, str]]) -> str:
+        """Build a prompt with all decompilations for this chunk."""
+        assert self.binary_info is not None
+
+        parts = [
+            f"Binary: {self.binary_info.arch} {self.binary_info.format} "
+            f"({self.binary_info.compiler})",
+            "",
+            f"Analyze the following {len(items)} functions.",
+            "",
+        ]
+
+        known = {
+            addr: r.name
+            for addr, r in self.results.items()
+            if r.name and not r.skipped and not r.error
+        }
+        if known:
+            parts.append("### Already Identified Functions")
+            for addr, name in sorted(known.items()):
+                parts.append(f"- 0x{addr:08x}: {name}")
+            parts.append("")
+
+        for item, decompilation in items:
+            func = item.function
+            parts.append(f"### 0x{func.address:08x}: {func.name} ({func.size} bytes)")
+            parts.append("```c")
+            parts.append(decompilation)
+            parts.append("```")
+            parts.append("")
+
+        return "\n".join(parts)
 
     def _analyze_function_sequential(self, item: WorkItem) -> FunctionResult:
         """Analyze a single function sequentially (used for obfuscated functions)."""
@@ -385,7 +513,7 @@ class Supervisor:
             binary_info=self.binary_info,
             known_results=self.results,
             strings=self.strings,
-            model=SONNET_MODEL,
+            model=OPUS_MODEL,
         )
 
         if result.obfuscation_techniques:
@@ -404,30 +532,6 @@ class Supervisor:
             ))
 
         return result
-
-    def _write_back_response(self, addr: int, response: LLMResponse) -> bool:
-        """Write LLM response back to Ghidra (rename, signature, comments)."""
-        sig_ok = True
-        if response.name:
-            try:
-                self.client.rename_function(addr, response.name)
-            except Exception as e:
-                logger.warning("Failed to rename 0x%08x to %s: %s", addr, response.name, e)
-
-        if response.signature:
-            try:
-                self.client.set_function_signature(addr, response.signature)
-            except Exception as e:
-                logger.debug("Signature deferred for 0x%08x (will retry in cleanup): %s", addr, e)
-                sig_ok = False
-
-        if response.comments:
-            try:
-                self.client.add_comment(addr, response.comments)
-            except Exception as e:
-                logger.debug("Failed to add comment at 0x%08x: %s", addr, e)
-
-        return sig_ok
 
     def _record_analysis_result(self, func: FunctionInfo, result: FunctionResult) -> None:
         """Record a function result into the results dict and stats."""
@@ -455,7 +559,7 @@ class Supervisor:
             ))
 
     def _run_cleanup(self) -> None:
-        """Unify struct types, apply to Ghidra, re-analyze affected and low-confidence functions."""
+        """Unify struct types and retry failed signatures."""
         self._emit(Event(
             type=EventType.PHASE_START,
             phase=Phase.CLEANUP,
@@ -463,7 +567,6 @@ class Supervisor:
         ))
 
         structs_created = 0
-        retyped_addrs: list[int] = []
 
         if self.struct_accumulator.proposal_count > 0:
             unified = self.struct_accumulator.unify()
@@ -480,7 +583,7 @@ class Supervisor:
                 },
             ))
 
-            retyped_addrs = apply_unified_structs(self.client, unified)
+            apply_unified_structs(self.client, unified)
             structs_created = len(unified)
 
             for us in unified:
@@ -527,92 +630,11 @@ class Supervisor:
                 },
             ))
 
-        low_confidence = [
-            r for r in self.results.values()
-            if not r.skipped and not r.error and r.confidence < 50
-        ]
-        low_conf_addrs = {r.address for r in low_confidence}
-
-        reanalyze_addrs = sorted(set(retyped_addrs) | low_conf_addrs)
-        reanalyzed = 0
-
-        if reanalyze_addrs and self.llm_client is not None:
-            known_types = self.client.list_custom_types()
-            analyzer = Analyzer(self.client, self.llm_client)
-
-            for addr in reanalyze_addrs:
-                if self._paused:
-                    continue
-
-                old_result = self.results.get(addr)
-                func_name = old_result.original_name if old_result else f"FUN_{addr:08x}"
-
-                self._emit(Event(
-                    type=EventType.FUNCTION_START,
-                    phase=Phase.CLEANUP,
-                    message=f"Re-analyzing {func_name} (0x{addr:08x})...",
-                    data={"address": addr, "name": func_name},
-                ))
-
-                func_info = self._find_function(addr)
-                if func_info is None:
-                    continue
-
-                item = WorkItem(
-                    function=func_info,
-                    callers=self.triage_result.call_graph.callers.get(addr, []) if self.triage_result else [],
-                    callees=self.triage_result.call_graph.callees.get(addr, []) if self.triage_result else [],
-                )
-
-                try:
-                    new_result = analyzer.analyze(
-                        item,
-                        binary_info=self.binary_info,
-                        known_results=self.results,
-                        strings=self.strings,
-                        known_types=known_types,
-                    )
-                except Exception as e:
-                    self._emit(Event(
-                        type=EventType.FUNCTION_ERROR,
-                        phase=Phase.CLEANUP,
-                        message=f"Error re-analyzing {func_name}: {e}",
-                        data={"address": addr, "error": str(e)},
-                    ))
-                    continue
-
-                if new_result.confidence > (old_result.confidence if old_result else 0):
-                    self.results[addr] = new_result
-                    reanalyzed += 1
-
-                    self._emit(Event(
-                        type=EventType.FUNCTION_COMPLETE,
-                        phase=Phase.CLEANUP,
-                        message=(
-                            f"0x{addr:08x} → {new_result.name} "
-                            f"(confidence: {new_result.confidence}%, "
-                            f"was {old_result.confidence if old_result else 0}%)"
-                        ),
-                        data={
-                            "address": addr,
-                            "name": new_result.name,
-                            "confidence": new_result.confidence,
-                            "previous_confidence": old_result.confidence if old_result else 0,
-                        },
-                    ))
-
         self._emit(Event(
             type=EventType.PHASE_COMPLETE,
             phase=Phase.CLEANUP,
-            message=(
-                f"Cleanup complete. {structs_created} structs created, "
-                f"{reanalyzed}/{len(reanalyze_addrs)} functions improved."
-            ),
-            data={
-                "structs_created": structs_created,
-                "reanalyze_candidates": len(reanalyze_addrs),
-                "reanalyzed": reanalyzed,
-            },
+            message=f"Cleanup complete. {structs_created} structs created.",
+            data={"structs_created": structs_created},
         ))
 
     def _run_synthesis(self) -> None:
@@ -635,7 +657,7 @@ class Supervisor:
         for addr, result in self.results.items():
             if result.skipped or result.error:
                 continue
-            decomp = self.client.get_decompilation(addr)
+            decomp = self._get_decompilation(addr)
             if decomp:
                 decompilations[addr] = normalize(decomp)
 
@@ -650,7 +672,7 @@ class Supervisor:
         synthesizer = SemanticSynthesizer(self.llm_client)
         try:
             synthesis_result = synthesizer.synthesize(
-                list(self.results.values()), decompilations, model=SONNET_MODEL,
+                list(self.results.values()), decompilations, model=OPUS_MODEL,
             )
         except Exception as e:
             logger.warning("Synthesis failed: %s", e)
@@ -722,7 +744,7 @@ class Supervisor:
         ]
         decompilations: dict[int, str] = {}
         for addr in exportable_addrs:
-            decomp = self.client.get_decompilation(addr)
+            decomp = self._get_decompilation(addr)
             if decomp:
                 decompilations[addr] = normalize(decomp)
 
@@ -774,13 +796,8 @@ class Supervisor:
             data={"output_dir": str(output_dir)},
         ))
 
-
     def _find_function(self, addr: int) -> FunctionInfo | None:
-        """Look up a FunctionInfo by address from the triage function list."""
-        for f in self.functions:
-            if f.address == addr:
-                return f
-        return None
+        return self._functions_by_addr.get(addr)
 
     def _stats_dict(self) -> dict[str, int | float]:
         s = self.stats

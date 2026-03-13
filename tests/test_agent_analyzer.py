@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 from kong.agent.analyzer import (
     Analyzer,
     AnalysisContext,
-    CallerSnippet,
-    CalleeSnippet,
     LLMResponse,
-    VariableRename,
 )
 from kong.agent.queue import WorkItem
 from kong.agent.models import FunctionResult
@@ -349,3 +347,87 @@ class TestNormalizerIntegration:
         assert len(ctx.callee_snippets) == 1
         assert "undefined4" not in ctx.callee_snippets[0].snippet
         assert "- 3" in ctx.callee_snippets[0].snippet
+
+
+class TestBuildBatchPrompt:
+    def test_batch_prompt_contains_all_functions(self) -> None:
+        """Batch prompt should contain separator and decompilation for each context."""
+        client = MagicMock()
+        llm = MagicMock()
+        analyzer = Analyzer(client, llm)
+
+        binary_info = BinaryInfo(
+            arch="x86", format="ELF", endianness="little",
+            word_size=8, compiler="gcc", name="test",
+        )
+
+        contexts = []
+        for i in range(3):
+            ctx = AnalysisContext(
+                function=FunctionInfo(
+                    address=0x1000 + i * 0x100,
+                    name=f"FUN_{0x1000 + i * 0x100:08x}",
+                    size=64,
+                ),
+                decompilation=f"void func_{i}(void) {{ return; }}",
+                binary_info=binary_info,
+            )
+            contexts.append(ctx)
+
+        prompt = analyzer.build_batch_prompt(contexts)
+        assert "=== Function 1" in prompt
+        assert "=== Function 2" in prompt
+        assert "=== Function 3" in prompt
+        assert "func_0" in prompt
+        assert "func_2" in prompt
+        assert "0x00001000" in prompt
+
+
+class TestParseBatchJson:
+    def test_parses_json_array(self) -> None:
+        raw = json.dumps([
+            {"address": "0x1000", "name": "foo", "signature": "void foo(void)",
+             "confidence": 85, "classification": "utility", "comments": "", "reasoning": ""},
+            {"address": "0x2000", "name": "bar", "signature": "int bar(int x)",
+             "confidence": 70, "classification": "math", "comments": "", "reasoning": ""},
+        ])
+        results = Analyzer.parse_llm_json_batch(raw)
+        assert len(results) == 2
+        assert results[0].name == "foo"
+        assert results[1].name == "bar"
+        assert results[0].confidence == 85
+
+    def test_handles_markdown_fences(self) -> None:
+        raw = '```json\n[{"address": "0x1000", "name": "test", "confidence": 50}]\n```'
+        results = Analyzer.parse_llm_json_batch(raw)
+        assert len(results) == 1
+        assert results[0].name == "test"
+
+    def test_returns_empty_on_parse_failure(self) -> None:
+        results = Analyzer.parse_llm_json_batch("not json at all")
+        assert results == []
+
+    def test_recovers_truncated_json_array(self) -> None:
+        raw = '[{"name": "foo", "confidence": 80}, {"name": "bar", "confid'
+        results = Analyzer.parse_llm_json_batch(raw)
+        assert len(results) >= 1
+        assert results[0].name == "foo"
+
+    def test_recovers_trailing_comma(self) -> None:
+        raw = '[{"name": "foo", "confidence": 80,}]'
+        results = Analyzer.parse_llm_json_batch(raw)
+        assert len(results) == 1
+        assert results[0].name == "foo"
+
+
+class TestParseLlmJsonRepair:
+    def test_recovers_trailing_comma_single(self) -> None:
+        raw = '{"name": "init_state", "confidence": 85, "classification": "init",}'
+        result = Analyzer.parse_llm_json(raw)
+        assert result.name == "init_state"
+        assert result.confidence == 85
+
+    def test_recovers_truncated_object(self) -> None:
+        raw = '{"name": "process_data", "confidence": 70, "classification": "par'
+        result = Analyzer.parse_llm_json(raw)
+        assert result.name == "process_data"

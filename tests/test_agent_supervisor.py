@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from kong.agent.analyzer import LLMResponse
 from kong.agent.events import EventType, Phase
-from kong.agent.models import FunctionResult
-from kong.agent.models import AnalysisStats
+from kong.agent.models import AnalysisStats, FunctionResult
 from kong.agent.supervisor import Supervisor
 from kong.config import KongConfig, OutputConfig
 from kong.ghidra.types import BinaryInfo, FunctionClassification, FunctionInfo
@@ -29,6 +29,21 @@ def _make_client(functions=None, binary_info=None):
 
 def _func(addr, name, size=100, cls=FunctionClassification.MEDIUM):
     return FunctionInfo(address=addr, name=name, size=size, classification=cls)
+
+
+def _batch_response_with_addresses(prompt: str, **kwargs: object) -> list[LLMResponse]:
+    """Mock batch response that extracts addresses from chunk prompt headers."""
+    import re
+    addresses = re.findall(r"### (0x[0-9a-fA-F]+):", prompt)
+    return [
+        LLMResponse(
+            name=f"func_{i}",
+            confidence=80,
+            classification="utility",
+            address=int(addr, 16),
+        )
+        for i, addr in enumerate(addresses)
+    ]
 
 
 class TestSupervisorLifecycle:
@@ -96,7 +111,6 @@ class TestSupervisorTriage:
 
         queue_events = [e for e in events if e.type == EventType.TRIAGE_QUEUE_BUILT]
         assert len(queue_events) == 1
-        # Only non-thunk function should be in queue
         assert queue_events[0].data["queue_size"] == 1
 
 
@@ -126,17 +140,16 @@ class TestSupervisorAnalysis:
         for addr in [0x1000, 0x2000, 0x3000]:
             assert addr in results
 
-    def test_function_start_and_complete_events(self, tmp_path):
-        from kong.agent.analyzer import LLMResponse
-
+    def test_chunk_analysis_emits_events(self, tmp_path):
         funcs = [_func(0x1000, "a")]
         client = _make_client(functions=funcs)
         client.get_decompilation.return_value = "void a(void) { return; }"
         config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
 
         mock_llm = MagicMock()
+        mock_llm.analyze_function_batch.side_effect = _batch_response_with_addresses
         mock_llm.analyze_function.return_value = LLMResponse(
-            name="init", confidence=80, raw='{"name":"init","confidence":80}',
+            name="", raw='{"globals":{},"structs":[],"name_refinements":{}}',
         )
 
         sup = Supervisor(client, config, llm_client=mock_llm)
@@ -149,14 +162,20 @@ class TestSupervisorAnalysis:
         assert len(starts) >= 1
         assert any(e.data["address"] == 0x1000 for e in starts)
 
-    def test_handles_analysis_error(self, tmp_path):
+        completes = [e for e in events if e.type == EventType.FUNCTION_COMPLETE]
+        assert len(completes) >= 1
+
+    def test_handles_chunk_error(self, tmp_path):
         funcs = [_func(0x1000, "a")]
         client = _make_client(functions=funcs)
         client.get_decompilation.return_value = "void a(void) { return; }"
         config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
 
         mock_llm = MagicMock()
-        mock_llm.analyze_function.side_effect = RuntimeError("LLM timeout")
+        mock_llm.analyze_function_batch.side_effect = RuntimeError("LLM timeout")
+        mock_llm.analyze_function.return_value = LLMResponse(
+            name="", raw='{"globals":{},"structs":[],"name_refinements":{}}',
+        )
 
         sup = Supervisor(client, config, llm_client=mock_llm)
 
@@ -305,12 +324,11 @@ class TestSupervisorSynthesis:
         client.get_decompilation.return_value = "void a(void) { return; }"
         config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
 
-        from kong.agent.analyzer import LLMResponse
-
         mock_llm = MagicMock()
         mock_llm.analyze_function.return_value = LLMResponse(
             name="init", confidence=80, raw='{"globals":{},"structs":[],"name_refinements":{}}',
         )
+        mock_llm.analyze_function_batch.side_effect = _batch_response_with_addresses
 
         sup = Supervisor(client, config, llm_client=mock_llm)
 
@@ -358,3 +376,106 @@ class TestSupervisorSynthesis:
         ]
         assert len(synthesis_completes) == 1
         assert "skipped" in synthesis_completes[0].message.lower()
+
+
+class TestDecompilationCache:
+    def test_cached_decompilation_avoids_redundant_ghidra_calls(self, tmp_path):
+        client = _make_client(functions=[_func(0x1000, "FUN_1000")])
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+        sup = Supervisor(client, config)
+        sup._decompilation_cache[0x1000] = "cached code"
+
+        result = sup._get_decompilation(0x1000)
+        assert result == "cached code"
+        client.get_decompilation.assert_not_called()
+
+    def test_uncached_decompilation_calls_ghidra_and_caches(self, tmp_path):
+        client = _make_client(functions=[_func(0x1000, "FUN_1000")])
+        client.get_decompilation.return_value = "void foo(void) {}"
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+        sup = Supervisor(client, config)
+
+        result = sup._get_decompilation(0x1000)
+        assert result == "void foo(void) {}"
+        assert 0x1000 in sup._decompilation_cache
+        client.get_decompilation.assert_called_once_with(0x1000)
+
+
+class TestCleanup:
+    def test_cleanup_retries_signatures(self, tmp_path):
+        client = _make_client()
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+        sup = Supervisor(client, config)
+        sup.binary_info = client.get_binary_info()
+        sup.results[0x1000] = FunctionResult(
+            address=0x1000, original_name="FUN_1000",
+            name="init", confidence=80, signature="void init(void)",
+            signature_applied=False,
+        )
+
+        sup._run_cleanup()
+
+        client.set_function_signature.assert_called_once_with(0x1000, "void init(void)")
+        assert sup.results[0x1000].signature_applied is True
+
+
+class TestChunkedPipelineIntegration:
+    def test_full_pipeline_uses_chunk_calls(self, tmp_path):
+        funcs = [_func(0x1000 + i * 0x100, f"FUN_{i}", size=64) for i in range(5)]
+        client = _make_client(functions=funcs)
+        client.get_decompilation.return_value = "void f(void) { return; }"
+        client.get_xrefs_from.return_value = []
+        client.get_function_info.return_value = funcs[0]
+        client.list_custom_types.return_value = []
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+
+        mock_llm = MagicMock()
+        mock_llm.analyze_function_batch.side_effect = _batch_response_with_addresses
+        mock_llm.analyze_function.return_value = LLMResponse(
+            name="", raw='{"globals":{},"structs":[],"name_refinements":{}}',
+        )
+
+        sup = Supervisor(client, config, llm_client=mock_llm)
+        sup.run()
+
+        assert mock_llm.analyze_function_batch.call_count > 0
+        named = [r for r in sup.results.values() if r.name and not r.skipped]
+        assert len(named) == 5
+
+    def test_chunk_prompt_includes_decompilations(self, tmp_path):
+        funcs = [_func(0x1000, "FUN_1000", size=64)]
+        client = _make_client(functions=funcs)
+        client.get_decompilation.return_value = "void special_func(void) { return; }"
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+
+        mock_llm = MagicMock()
+        mock_llm.analyze_function_batch.side_effect = _batch_response_with_addresses
+        mock_llm.analyze_function.return_value = LLMResponse(
+            name="", raw='{"globals":{},"structs":[],"name_refinements":{}}',
+        )
+
+        sup = Supervisor(client, config, llm_client=mock_llm)
+        sup.run()
+
+        prompt = mock_llm.analyze_function_batch.call_args[0][0]
+        assert "0x00001000" in prompt
+        assert "special_func" in prompt
+        assert "x86-64" in prompt
+
+    def test_all_functions_in_single_chunk(self, tmp_path):
+        """With < CHUNK_SIZE functions, everything goes in one LLM call."""
+        funcs = [_func(0x1000 + i * 0x100, f"FUN_{i}", size=64) for i in range(10)]
+        client = _make_client(functions=funcs)
+        client.get_decompilation.return_value = "void f(void) { return; }"
+        config = KongConfig(output=OutputConfig(directory=tmp_path / "out"))
+
+        mock_llm = MagicMock()
+        mock_llm.analyze_function_batch.side_effect = _batch_response_with_addresses
+        mock_llm.analyze_function.return_value = LLMResponse(
+            name="", raw='{"globals":{},"structs":[],"name_refinements":{}}',
+        )
+
+        sup = Supervisor(client, config, llm_client=mock_llm)
+        sup.run()
+
+        assert mock_llm.analyze_function_batch.call_count == 1

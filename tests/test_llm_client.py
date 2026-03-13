@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
-from kong.llm.client import (
-    AnthropicClient,
-    ModelTokenUsage,
-    TokenUsage,
-    _PRICING,
-)
+from kong.llm.client import AnthropicClient
+from kong.llm.usage import ModelTokenUsage, TokenUsage
 
 
 def _mock_message(text: str, input_tokens: int = 100, output_tokens: int = 50):
@@ -118,7 +115,7 @@ class TestAnthropicClient:
         client.analyze_function("p2", model="claude-haiku-4-5-20251001")
 
         assert len(client.usage.by_model) == 2
-        assert "claude-sonnet-4-20250514" in client.usage.by_model
+        assert "claude-opus-4-6" in client.usage.by_model
         assert "claude-haiku-4-5-20251001" in client.usage.by_model
         assert client.usage.calls == 2
 
@@ -154,8 +151,8 @@ class TestAnthropicClient:
 class TestModelTokenUsage:
     def test_cost_calculation(self):
         u = ModelTokenUsage(input_tokens=1_000_000, output_tokens=1_000_000)
-        cost = u.cost_usd("claude-sonnet-4-20250514")
-        assert cost == 3.0 + 15.0
+        cost = u.cost_usd("claude-opus-4-6")
+        assert cost == 5.0 + 25.0
 
     def test_cost_with_unknown_model_uses_default(self):
         u = ModelTokenUsage(input_tokens=1_000_000, output_tokens=1_000_000)
@@ -167,8 +164,8 @@ class TestModelTokenUsage:
             input_tokens=0, output_tokens=0,
             cache_creation_tokens=1_000_000, cache_read_tokens=1_000_000,
         )
-        cost = u.cost_usd("claude-sonnet-4-20250514")
-        assert cost == (3.0 * 1.25) + (3.0 * 0.10)
+        cost = u.cost_usd("claude-opus-4-6")
+        assert cost == (5.0 * 1.25) + (5.0 * 0.10)
 
 
 class TestTokenUsage:
@@ -188,21 +185,68 @@ class TestTokenUsage:
 
     def test_total_cost_across_models(self):
         u = TokenUsage()
-        u._get("claude-sonnet-4-20250514").input_tokens = 1_000_000
-        u._get("claude-sonnet-4-20250514").output_tokens = 0
+        u._get("claude-opus-4-6").input_tokens = 1_000_000
+        u._get("claude-opus-4-6").output_tokens = 0
         u._get("claude-haiku-4-5-20251001").input_tokens = 1_000_000
         u._get("claude-haiku-4-5-20251001").output_tokens = 0
 
-        assert u.total_cost_usd == 3.0 + 1.0
+        assert u.total_cost_usd == 5.0 + 1.0
 
 
-class TestPricingValues:
-    def test_pricing_entries_exist(self):
-        assert "claude-sonnet-4-20250514" in _PRICING
-        assert "claude-haiku-4-5-20251001" in _PRICING
+class TestAnalyzeFunctionBatch:
+    def test_batch_returns_list_of_responses(self) -> None:
+        mock_anthropic = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(type="text", text=json.dumps([
+            {"address": "0x1000", "name": "foo", "confidence": 80},
+            {"address": "0x2000", "name": "bar", "confidence": 70},
+        ]))]
+        mock_message.usage = MagicMock(
+            input_tokens=100, output_tokens=50,
+            cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        )
+        mock_anthropic.messages.create.return_value = mock_message
 
-    def test_haiku_cheaper_than_sonnet(self):
-        haiku_in, haiku_out = _PRICING["claude-haiku-4-5-20251001"]
-        sonnet_in, sonnet_out = _PRICING["claude-sonnet-4-20250514"]
-        assert haiku_in < sonnet_in
-        assert haiku_out < sonnet_out
+        client = AnthropicClient(api_key="test")
+        client._client = mock_anthropic
+        results = client.analyze_function_batch("batch prompt", model="claude-haiku-4-5-20251001")
+
+        assert len(results) == 2
+        assert results[0].name == "foo"
+        assert results[1].name == "bar"
+
+    def test_batch_uses_batch_system_prompt(self) -> None:
+        mock_anthropic = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(type="text", text='[{"name": "f", "confidence": 50}]')]
+        mock_message.usage = MagicMock(
+            input_tokens=100, output_tokens=50,
+            cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        )
+        mock_anthropic.messages.create.return_value = mock_message
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_anthropic
+        client.analyze_function_batch("prompt")
+
+        call_kwargs = mock_anthropic.messages.create.call_args
+        system_text = call_kwargs.kwargs["system"][0]["text"]
+        assert "multiple" in system_text.lower() or "batch" in system_text.lower()
+
+    def test_batch_records_usage(self) -> None:
+        mock_anthropic = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [MagicMock(type="text", text='[{"name": "f", "confidence": 50}]')]
+        mock_message.usage = MagicMock(
+            input_tokens=500, output_tokens=200,
+            cache_creation_input_tokens=100, cache_read_input_tokens=50,
+        )
+        mock_anthropic.messages.create.return_value = mock_message
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_anthropic
+        client.analyze_function_batch("prompt")
+
+        assert client.usage.input_tokens == 500
+        assert client.usage.output_tokens == 200
+        assert client.usage.calls == 1
