@@ -1,4 +1,4 @@
-"""Kong CLI — autonomous binary analysis engine."""
+"""Kong CLI — world's first AI reverse engineer."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ console = Console()
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output.")
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:
-    """Kong — autonomous binary analysis engine.
+    """Kong — world's first AI reverse engineer.
 
     Point it at a stripped binary, get back clean decompiled source,
     annotated Ghidra project, and structured JSON.

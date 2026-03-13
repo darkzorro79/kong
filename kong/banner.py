@@ -22,7 +22,7 @@ KONG_ASCII = r"""
 
 def print_banner(console: Console) -> None:
     banner = Text(KONG_ASCII, style="bold red")
-    subtitle = Text("Autonomous Binary Analysis Engine", style="dim white")
+    subtitle = Text("World's first AI reverse engineer", style="dim white")
     version = Text(f"v{__version__}", style="bold white")
 
     content = Text()
