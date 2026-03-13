@@ -27,7 +27,6 @@ Kong solves this by building rich context windows from Ghidra's program analysis
 <img src="./assets/github-banner.png" alt="Kong: World's first AI reverse engineer" width="100%">
 
 <img src="./assets/kong-demo.gif" alt="Kong: World's first AI reverse engineer" width="100%">
-![Demo](assets/kong-demo.gif)
 
 ## Features
 
