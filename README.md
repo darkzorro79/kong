@@ -74,14 +74,14 @@ Kong uses a five-phase pipeline orchestrated by a supervisor that coordinates tr
             ┌──────────────────────┐
             │     Synthesis        │
             │  unify names, build  │
-            │  structs, refine     │
+            │  structs, deobfuscate│
             └──────────┬───────────┘
                        │
                        ▼
             ┌──────────────────────┐
             │       Export         │
-            │  analysis.json +    │
-            │  Ghidra writeback   │
+            │  analysis.json +     │
+            │  Ghidra writeback    │
             └──────────────────────┘
 ```
 
