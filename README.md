@@ -1,14 +1,12 @@
 <div align="left">
 
 
-# Kong
+# Kong: The Agentic Reverse Engineer
 
 <img src="./assets/kong-logo.png" alt="Kong: World's first AI reverse engineer" width="50%">
 
-**The world's first AI reverse engineer.** <br />
-LLM orchestration for reverse engineering binaries.
+**LLM orchestration for reverse engineering binaries** <br />
 
----
 </div>
 
 ## What is Kong?
@@ -20,7 +18,7 @@ Kong automates the mechanical layer, using an NSA-grade reverse engineering fram
 
 Stripped binaries lose all the context that makes code readable: function names, type information, variable names, struct layouts. Recovering that context is the bulk of the work in most RE tasks, and it's largely pattern matching: recognizing standard library functions, inferring types from usage, propagating names through call graphs.
 
-LLMs are good at exactly this kind of pattern matching. But pointing an LLM at raw decompiler output and asking "what does this do?" gives you mediocre results — the model lacks calling context, cross-reference information, and the broader picture of how the binary is structured. In addition, most obfuscated binaries introduce extreme techniques in order to prevent reverse engineering.
+LLMs are good at exactly this kind of pattern matching. But pointing an LLM at raw decompiler output and asking "what does this do?" gives you mediocre results. The model lacks calling context, cross-reference information, and the broader picture of how the binary is structured. In addition, most obfuscated binaries introduce extreme techniques in order to prevent reverse engineering.
 
 Kong solves this by building rich context windows from Ghidra's program analysis (call graphs, cross-references, string references, data flow) before ever touching the LLM, then orchestrating the analysis in dependency order so each function benefits from its callees already being named. Additionally, Kong introduces its own, first-of-its-kind, agentic deobfuscation pipeline.
 
