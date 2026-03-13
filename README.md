@@ -234,7 +234,7 @@ Also, don't hesitate to reach out to me on [X](https://x.com/0xamruth) or [Linke
 - [Textual](https://textual.textualize.io/)
 - [Rich](https://rich.readthedocs.io/)
 
-A big shoutout to [KeygraphHQ](https://keygraph.io/)'s [Shannon](https://github.com/KeygraphHQ/shannon) project, which provided the inspiration for this project. My motivation was driven by replicating the same kind of agentic reverse engineering pipeline that Shannon uses for its web-based pentesting tool.
+A big shoutout to [KeygraphHQ](https://keygraph.io/)'s [Shannon](https://github.com/KeygraphHQ/shannon) project, which provided the inspiration for this project. My motivation was driven by replicating the same kind of pipeline that Shannon uses for its web-based pentesting tool, and adapting it for binary analysis and decompilation.
 
 ---
 
