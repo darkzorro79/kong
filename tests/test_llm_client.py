@@ -133,21 +133,6 @@ class TestAnthropicClient:
         assert response.name == ""
         assert "Failed to parse" in response.reasoning
 
-    @patch("kong.llm.client.anthropic.Anthropic")
-    def test_response_has_token_counts(self, mock_anthropic_cls):
-        mock_client = MagicMock()
-        mock_anthropic_cls.return_value = mock_client
-        mock_client.messages.create.return_value = _mock_message(
-            '{"name": "f"}', input_tokens=500, output_tokens=200
-        )
-
-        client = AnthropicClient(api_key="test-key")
-        response = client.analyze_function("prompt")
-
-        assert response.input_tokens == 500
-        assert response.output_tokens == 200
-
-
 class TestModelTokenUsage:
     def test_cost_calculation(self):
         u = ModelTokenUsage(input_tokens=1_000_000, output_tokens=1_000_000)

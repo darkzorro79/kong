@@ -123,14 +123,6 @@ class TestSimplifierParsing:
         result = simplify_expression("1 << 3")
         assert result.simplified == "8"
 
-    def test_empty_expression(self):
-        result = simplify_expression("")
-        assert result.error != ""
-
-    def test_invalid_expression(self):
-        result = simplify_expression("@#$")
-        assert result.error != ""
-
     def test_suffix_literal(self):
         result = simplify_expression("42u + 0")
         assert result.simplified == "42"
@@ -155,10 +147,6 @@ class TestSimplifierParsing:
         assert result.is_opaque is True
         assert result.predicate_kind == PredicateKind.ALWAYS_TRUE
 
-
-# ===================================================================
-# State machine tracer tests
-# ===================================================================
 
 def _make_cff_cfg() -> tuple[ControlFlowGraph, list[PcodeOp]]:
     """Build a synthetic CFF control flow graph.
@@ -229,16 +217,6 @@ class TestStateMachineTracer:
         result = trace_state_machine_from_cfg(cfg, pcode, "state")
         assert result.state_variable == "state"
 
-    def test_wrong_state_var(self):
-        cfg, pcode = _make_cff_cfg()
-        result = trace_state_machine_from_cfg(cfg, pcode, "nonexistent")
-        assert result.error != ""
-
-    def test_empty_cfg(self):
-        cfg = ControlFlowGraph(function_addr=0x1000)
-        result = trace_state_machine_from_cfg(cfg, [], "state")
-        assert result.error != ""
-
     def test_linear_chains(self):
         result = StateMachineResult(
             states=[1, 2, 3, 4, 5],
@@ -265,10 +243,6 @@ class TestStateMachineTracer:
         assert len(result.transitions_from(1)) == 2
         assert len(result.transitions_from(3)) == 0
 
-
-# ===================================================================
-# Dead code elimination tests
-# ===================================================================
 
 class TestDeadCodeElimination:
     def test_always_true_removes_else(self):

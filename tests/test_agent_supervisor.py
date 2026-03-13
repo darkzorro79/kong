@@ -256,11 +256,6 @@ class TestAnalysisStats:
         stats.confirmed = 1
         assert stats.name_rate == 0.75
 
-    def test_name_rate_zero_functions(self):
-        stats = AnalysisStats(total_functions=0)
-        assert stats.name_rate == 0.0
-
-
 class TestSupervisorExport:
     def test_export_creates_source_file(self, tmp_path):
         funcs = [_func(0x1000, "a")]

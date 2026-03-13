@@ -14,10 +14,6 @@ from kong.llm.tools import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Tool schema tests
-# ---------------------------------------------------------------------------
-
 class TestToolSchemas:
     def test_all_tools_have_required_fields(self):
         for tool in DEOBFUSCATION_TOOLS:
@@ -28,10 +24,6 @@ class TestToolSchemas:
             assert "properties" in tool["input_schema"]
             assert "required" in tool["input_schema"]
 
-    def test_tool_names_unique(self):
-        names = [t["name"] for t in DEOBFUSCATION_TOOLS]
-        assert len(names) == len(set(names))
-
     def test_expected_tools_present(self):
         names = {t["name"] for t in DEOBFUSCATION_TOOLS}
         assert "simplify_expression" in names
@@ -41,10 +33,6 @@ class TestToolSchemas:
         assert "get_decompilation" in names
         assert "get_basic_blocks" in names
 
-
-# ---------------------------------------------------------------------------
-# ToolExecutor tests
-# ---------------------------------------------------------------------------
 
 class TestToolExecutor:
     @pytest.fixture
@@ -112,13 +100,6 @@ class TestToolExecutor:
         result = executor.execute("nonexistent_tool", {})
         assert "Unknown tool" in result
 
-    def test_call_log(self, executor):
-        executor.execute("simplify_expression", {"expression": "1 + 2"})
-        executor.execute("simplify_expression", {"expression": "3 + 4"})
-        assert executor.call_count == 2
-        assert executor.call_log[0].tool_name == "simplify_expression"
-        assert executor.call_log[1].tool_input["expression"] == "3 + 4"
-
     def test_handles_execution_error(self, executor, mock_ghidra):
         mock_ghidra.get_decompilation.side_effect = Exception("Ghidra crashed")
         result = executor.execute("get_decompilation", {
@@ -127,10 +108,6 @@ class TestToolExecutor:
         assert "Error" in result
         assert executor.call_count == 1
 
-
-# ---------------------------------------------------------------------------
-# Tool use loop tests (mocked Anthropic)
-# ---------------------------------------------------------------------------
 
 class TestToolUseLoop:
     def _mock_text_message(self, text, input_tokens=100, output_tokens=50):

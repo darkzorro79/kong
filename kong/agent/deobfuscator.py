@@ -42,10 +42,6 @@ _PATTERN_FILES: dict[ObfuscationType, str] = {
 }
 
 
-# -----------------------------------------------------------------------
-# Classification heuristics
-# -----------------------------------------------------------------------
-
 _CFF_LOOP_RE = re.compile(
     r"while\s*\(\s*(?:1|true)\s*\)\s*\{",
     re.IGNORECASE,
@@ -135,10 +131,6 @@ def _detect_vmprotect(code: str) -> bool:
     return len(lines) > 200
 
 
-# -----------------------------------------------------------------------
-# Pattern library loader
-# -----------------------------------------------------------------------
-
 def load_patterns(techniques: list[ObfuscationType]) -> str:
     """Load and concatenate pattern library files for the given techniques."""
     parts: list[str] = []
@@ -153,10 +145,6 @@ def load_patterns(techniques: list[ObfuscationType]) -> str:
             logger.warning("Pattern file not found: %s", path)
     return "\n\n---\n\n".join(parts)
 
-
-# -----------------------------------------------------------------------
-# Deobfuscator
-# -----------------------------------------------------------------------
 
 class Deobfuscator:
     """Orchestrates LLM-driven deobfuscation with symbolic tool access.

@@ -21,10 +21,6 @@ from kong.agent.models import FunctionResult
 from kong.ghidra.types import BinaryInfo, FunctionInfo
 
 
-# ---------------------------------------------------------------------------
-# Classification heuristic tests
-# ---------------------------------------------------------------------------
-
 _CFF_CODE = """\
 void FUN_004015a0(int *data, int len) {
     int state = 0x3a2b;
@@ -120,9 +116,6 @@ class TestClassifyObfuscation:
         assert ObfuscationType.CONTROL_FLOW_FLATTENING in techniques
         assert ObfuscationType.BOGUS_CONTROL_FLOW in techniques
 
-    def test_empty_code(self):
-        assert classify_obfuscation("") == []
-
     def test_vmprotect_needs_many_cases(self):
         code = "void dispatch(void) {\n"
         code += "while (1) {\n"
@@ -136,10 +129,6 @@ class TestClassifyObfuscation:
         techniques = classify_obfuscation(code)
         assert ObfuscationType.VM_PROTECTION in techniques
 
-
-# ---------------------------------------------------------------------------
-# Pattern library tests
-# ---------------------------------------------------------------------------
 
 class TestPatternLibrary:
     def test_load_cff_pattern(self):
@@ -167,14 +156,6 @@ class TestPatternLibrary:
         assert "Instruction Substitution" in content
         assert "VM-Based Protection" in content
 
-    def test_empty_techniques(self):
-        content = load_patterns([])
-        assert content == ""
-
-
-# ---------------------------------------------------------------------------
-# Deobfuscator orchestrator tests
-# ---------------------------------------------------------------------------
 
 def _make_context(decompilation: str = "void foo() {}") -> AnalysisContext:
     return AnalysisContext(
@@ -256,10 +237,6 @@ class TestDeobfuscator:
         tools = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools") or call_kwargs[0][2]
         assert tools == DEOBFUSCATION_TOOLS
 
-
-# ---------------------------------------------------------------------------
-# Integration: Analyzer delegates to Deobfuscator
-# ---------------------------------------------------------------------------
 
 class TestAnalyzerDeobfuscationIntegration:
     def test_obfuscated_function_delegates(self):

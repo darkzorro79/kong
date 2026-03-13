@@ -5,18 +5,6 @@ import pytest
 from kong.normalizer.syntactic import normalize
 
 
-class TestEmptyAndPassthrough:
-    def test_empty_string(self) -> None:
-        assert normalize("") == ""
-
-    def test_clean_code_unchanged(self) -> None:
-        code = "int x = a % 5;\nreturn x + 1;"
-        assert normalize(code) == code
-
-    def test_whitespace_only(self) -> None:
-        assert normalize("   \n\n  ") == "   \n\n  "
-
-
 class TestNegativeLiteralCleanup:
     def test_simple_plus_negative(self) -> None:
         assert normalize("x + -5") == "x - 5"

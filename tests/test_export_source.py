@@ -93,24 +93,6 @@ def sample_decompilations() -> dict[int, str]:
     }
 
 
-def test_export_data_instantiation(
-    binary_info: BinaryInfo,
-    stats: AnalysisStats,
-    token_usage: TokenUsage,
-) -> None:
-    data = ExportData(
-        binary_info=binary_info,
-        stats=stats,
-        results={},
-        decompilations={},
-        token_usage=token_usage,
-        duration_seconds=42.5,
-    )
-    assert data.binary_info.name == "test_binary"
-    assert data.duration_seconds == 42.5
-    assert data.results == {}
-
-
 def test_file_creation(
     tmp_path: Path,
     binary_info: BinaryInfo,

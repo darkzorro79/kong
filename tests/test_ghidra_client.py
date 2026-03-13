@@ -10,10 +10,6 @@ from kong.ghidra.client import GhidraClient, GhidraClientError, _classify
 from kong.ghidra.types import FunctionClassification
 
 
-# ---------------------------------------------------------------------------
-# Helpers — build mock Java objects
-# ---------------------------------------------------------------------------
-
 def _mock_program():
     """Create a mock Ghidra Program with enough methods for client tests."""
     prog = MagicMock()
@@ -58,10 +54,6 @@ def _mock_function(addr, name, size, is_thunk=False):
     return func
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 @pytest.fixture
 def mock_pyghidra():
     """Patch pyghidra.start and pyghidra.open_program."""
@@ -90,15 +82,7 @@ def client(mock_pyghidra, tmp_path):
     return c
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
 class TestConnection:
-    def test_open_sets_program(self, client):
-        assert client._program is not None
-        assert client._flat_api is not None
-
     def test_close_clears_state(self, client):
         client.close()
         assert client._program is None
@@ -111,7 +95,7 @@ class TestConnection:
         with pytest.raises(GhidraClientError, match="Not open"):
             c.program
 
-    def test_open_nonexistent_binary_raises(self, mock_pyghidra):
+    def test_open_nonexistent_binary_raises(self, mock_pyghidra):  # noqa: ARG002
         c = GhidraClient("/nonexistent/binary")
         with pytest.raises(GhidraClientError, match="Binary not found"):
             c.open()

@@ -105,10 +105,6 @@ def _classify_bool(original: str, z3_expr: z3.ExprRef) -> SimplificationResult:
     )
 
 
-# ---------------------------------------------------------------------------
-# C expression parser → z3 AST
-# ---------------------------------------------------------------------------
-
 class _ParseError(Exception):
     pass
 
@@ -333,10 +329,6 @@ class _ExprParser:
 
         raise _ParseError(f"Unknown binary operator: {op}")
 
-
-# ---------------------------------------------------------------------------
-# z3 AST → C-like string
-# ---------------------------------------------------------------------------
 
 def _z3_to_c(expr: z3.ExprRef) -> str:
     """Best-effort conversion of a z3 expression back to C-like syntax."""

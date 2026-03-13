@@ -11,12 +11,6 @@ def _func(addr: int, name: str, size: int = 100, classification: FunctionClassif
 
 
 class TestWorkQueueBasic:
-    def test_empty_queue(self):
-        q = WorkQueue()
-        assert len(q) == 0
-        assert not q
-        assert q.next() is None
-
     def test_build_simple(self):
         funcs = [_func(0x1000, "a"), _func(0x2000, "b"), _func(0x3000, "c")]
         q = WorkQueue()

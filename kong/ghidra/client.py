@@ -113,10 +113,6 @@ class GhidraClient:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    # ------------------------------------------------------------------
-    # Query methods
-    # ------------------------------------------------------------------
-
     def get_binary_info(self) -> BinaryInfo:
         """Get metadata about the loaded binary."""
         prog = self.program
@@ -279,10 +275,6 @@ class GhidraClient:
             )
         return entries
 
-    # ------------------------------------------------------------------
-    # Mutation methods — wrapped in transactions
-    # ------------------------------------------------------------------
-
     def rename_function(self, addr: int, new_name: str) -> None:
         """Rename a function at the given address."""
         func = self._get_function_at(addr)
@@ -363,10 +355,6 @@ class GhidraClient:
         finally:
             self.program.endTransaction(tx, True)
         logger.info("Added %s comment at 0x%08x", comment_type, addr)
-
-    # ------------------------------------------------------------------
-    # Type management methods
-    # ------------------------------------------------------------------
 
     def create_struct(self, definition: StructDefinition) -> None:
         """Create a struct data type in Ghidra's DataTypeManager.
@@ -559,10 +547,6 @@ class GhidraClient:
         }
         return _SIZED_DEFAULTS.get(size, Undefined4DataType.dataType)
 
-    # ------------------------------------------------------------------
-    # Control flow graph methods
-    # ------------------------------------------------------------------
-
     def get_basic_blocks(self, addr: int) -> list[BasicBlock]:
         """Get basic blocks for the function at addr."""
         from ghidra.program.model.block import SimpleBlockModel
@@ -697,10 +681,6 @@ class GhidraClient:
         if "COMPUTED" in name or "INDIRECT" in name:
             return BlockEdgeType.COMPUTED
         return BlockEdgeType.UNKNOWN
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def _to_addr(self, addr: int) -> Any:
         """Convert an integer offset to a Ghidra Address."""

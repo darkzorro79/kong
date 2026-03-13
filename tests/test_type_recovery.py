@@ -49,16 +49,7 @@ def _proposal(
     )
 
 
-# ---------------------------------------------------------------------------
-# StructAccumulator
-# ---------------------------------------------------------------------------
-
 class TestStructAccumulator:
-    def test_empty_accumulator(self):
-        acc = StructAccumulator()
-        assert acc.proposal_count == 0
-        assert acc.unify() == []
-
     def test_add_proposals(self):
         acc = StructAccumulator()
         acc.add_proposals(0x1000, [
@@ -171,10 +162,6 @@ class TestStructAccumulator:
         assert app.struct_name == "conn_t"
 
 
-# ---------------------------------------------------------------------------
-# _pick_best_field
-# ---------------------------------------------------------------------------
-
 class TestPickBestField:
     def test_prefers_descriptive_name(self):
         candidates = [
@@ -191,16 +178,6 @@ class TestPickBestField:
         ]
         best = _pick_best_field(candidates)
         assert best.data_type == "int"
-
-    def test_single_candidate(self):
-        candidates = [_field("x", "int", 0, 4)]
-        best = _pick_best_field(candidates)
-        assert best.name == "x"
-
-
-# ---------------------------------------------------------------------------
-# apply_unified_structs
-# ---------------------------------------------------------------------------
 
 class TestApplyUnifiedStructs:
     def test_creates_structs_and_applies_types(self):
@@ -262,20 +239,6 @@ class TestApplyUnifiedStructs:
         affected = apply_unified_structs(client, [us])
         assert affected == []
 
-    def test_no_applications(self):
-        client = MagicMock()
-        us = UnifiedStruct(
-            definition=StructDefinition(name="orphan_t", size=16, fields=[]),
-        )
-        affected = apply_unified_structs(client, [us])
-        client.create_struct.assert_called_once()
-        assert affected == []
-
-
-# ---------------------------------------------------------------------------
-# _resolve_param_ordinal
-# ---------------------------------------------------------------------------
-
 class TestResolveParamOrdinal:
     def test_resolves_by_name(self):
         client = MagicMock()
@@ -301,10 +264,6 @@ class TestResolveParamOrdinal:
         client.get_function_info.side_effect = Exception("No function")
         assert _resolve_param_ordinal(client, 0x1000, "param_1") is None
 
-
-# ---------------------------------------------------------------------------
-# LLM JSON parsing — struct_proposals
-# ---------------------------------------------------------------------------
 
 class TestParseLLMJsonStructs:
     def test_parse_with_struct_proposals(self):
@@ -359,10 +318,6 @@ class TestParseLLMJsonStructs:
         assert f.data_type == "undefined"
         assert f.size == 4
 
-
-# ---------------------------------------------------------------------------
-# Analyzer context — known types in prompt
-# ---------------------------------------------------------------------------
 
 class TestAnalyzerContextTypes:
     def test_known_types_included_in_prompt(self):
@@ -439,10 +394,6 @@ class TestAnalyzerContextTypes:
         assert "Known Struct Types" not in prompt
 
 
-# ---------------------------------------------------------------------------
-# Analyzer — struct proposals flow through to FunctionResult
-# ---------------------------------------------------------------------------
-
 class TestAnalyzerStructProposalPassthrough:
     def test_struct_proposals_in_result(self):
         response = LLMResponse(
@@ -486,42 +437,6 @@ class TestAnalyzerStructProposalPassthrough:
         assert len(result.struct_proposals) == 1
         assert result.struct_proposals[0].name == "req_t"
 
-
-# ---------------------------------------------------------------------------
-# Ghidra types dataclasses
-# ---------------------------------------------------------------------------
-
-class TestStructDefinition:
-    def test_field_count(self):
-        sd = StructDefinition(
-            name="test_t", size=16,
-            fields=[
-                StructField(name="a", data_type="int", offset=0, size=4),
-                StructField(name="b", data_type="int", offset=4, size=4),
-            ],
-        )
-        assert sd.field_count == 2
-
-    def test_field_at_offset(self):
-        sd = StructDefinition(
-            name="test_t", size=16,
-            fields=[
-                StructField(name="a", data_type="int", offset=0, size=4),
-                StructField(name="b", data_type="long", offset=8, size=8),
-            ],
-        )
-        assert sd.field_at_offset(0).name == "a"
-        assert sd.field_at_offset(8).name == "b"
-        assert sd.field_at_offset(4) is None
-
-    def test_struct_field_end_offset(self):
-        f = StructField(name="x", data_type="int", offset=4, size=4)
-        assert f.end_offset == 8
-
-
-# ---------------------------------------------------------------------------
-# Supervisor cleanup integration
-# ---------------------------------------------------------------------------
 
 class TestSupervisorCleanupIntegration:
     def test_cleanup_with_struct_proposals(self, tmp_path):

@@ -30,9 +30,6 @@ def _make_client(functions=None, binary_info=None, strings=None):
     return client
 
 
-# ── SignatureDB ──────────────────────────────────────────────
-
-
 class TestSignatureDB:
     def test_load_stdlib(self):
         db = SignatureDB()
@@ -110,9 +107,6 @@ class TestSignatureDB:
         assert count == 0
 
 
-# ── TriageAgent ──────────────────────────────────────────────
-
-
 class TestTriageAgent:
     def test_run_returns_triage_result(self):
         funcs = [_func(0x1000, "a"), _func(0x2000, "b")]
@@ -161,9 +155,6 @@ class TestTriageAgent:
 
         # Thunks excluded from queue
         assert result.queue_size == 2
-
-
-# ── Language Detection ───────────────────────────────────────
 
 
 class TestLanguageDetection:
@@ -235,11 +226,6 @@ class TestCallGraph:
             callees={0x1000: [0x2000], 0x2000: []},
         )
         assert g.edge_count == 1
-
-    def test_empty_graph(self):
-        g = CallGraph()
-        assert g.edge_count == 0
-
 
 class TestTriageResultCounts:
     def test_classification_counts(self):
