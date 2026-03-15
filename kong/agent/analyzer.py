@@ -23,6 +23,7 @@ from kong.normalizer.syntactic import normalize
 if TYPE_CHECKING:
     from kong.agent.deobfuscator import Deobfuscator
     from kong.llm.tools import ToolExecutor, ToolSchema
+    from kong.llm.usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ def strip_markdown_fences(text: str) -> str:
 
 class LLMClient(Protocol):
     """Protocol for LLM interaction."""
+
+    model: str
+    usage: TokenUsage
+
+    @property
+    def total_cost_usd(self) -> float: ...
 
     def analyze_function(self, prompt: str, *, model: str | None = None) -> LLMResponse: ...
 

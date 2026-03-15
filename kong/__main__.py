@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -14,12 +15,32 @@ from kong import __version__
 from kong.agent.events import Event, EventType
 from kong.agent.supervisor import Supervisor
 from kong.banner import check_api_key, print_analyze_header, print_banner, print_setup_needed
-from kong.config import GhidraConfig, KongConfig, OutputConfig
+from kong.config import GhidraConfig, KongConfig, LLMConfig, LLMProvider, OutputConfig
 from kong.evals.harness import score as eval_score
 from kong.ghidra.client import GhidraClient, GhidraClientError
-from kong.llm.client import AnthropicClient
+from kong.llm.usage import TokenUsage
+
+if TYPE_CHECKING:
+    from kong.agent.analyzer import LLMClient
 
 console = Console()
+
+
+_DEFAULT_MODELS: dict[LLMProvider, str] = {
+    LLMProvider.ANTHROPIC: "claude-opus-4-6",
+    LLMProvider.OPENAI: "gpt-4o",
+}
+
+
+def create_llm_client(config: LLMConfig) -> LLMClient:
+    """Instantiate the appropriate LLM client based on provider config."""
+    # will generalize further in the future
+    model = config.model or _DEFAULT_MODELS[config.provider]
+    if config.provider is LLMProvider.OPENAI:
+        from kong.llm.openai_client import OpenAIClient
+        return OpenAIClient(model=model, api_key=config.api_key)
+    from kong.llm.client import AnthropicClient
+    return AnthropicClient(model=model, api_key=config.api_key)
 
 
 @click.group(invoke_without_command=True)
@@ -45,7 +66,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
         console.print("Run [bold]kong --help[/bold] for all options.")
 
 
-def _print_final_stats(supervisor: Supervisor, llm_client: AnthropicClient) -> None:
+def _print_final_stats(supervisor: Supervisor, llm_client: LLMClient) -> None:
     stats = supervisor.stats
     console.print()
     console.print(
@@ -57,13 +78,16 @@ def _print_final_stats(supervisor: Supervisor, llm_client: AnthropicClient) -> N
         f"{stats.medium_confidence} med, {stats.low_confidence} low"
     )
     console.print(f"[bold]LLM calls:[/bold] {stats.llm_calls}")
-    for model_name, mu in llm_client.usage.by_model.items():
-        short_name = model_name.split("-")[1] if "-" in model_name else model_name
-        console.print(
-            f"  {short_name}: {mu.calls} calls, "
-            f"${mu.cost_usd(model_name):.4f}"
-        )
-    console.print(f"[bold]Cost:[/bold] ${llm_client.total_cost_usd:.4f}")
+    usage = getattr(llm_client, "usage", None)
+    if isinstance(usage, TokenUsage):
+        for model_name, mu in usage.by_model.items():
+            short_name = model_name.split("-")[1] if "-" in model_name else model_name
+            console.print(
+                f"  {short_name}: {mu.calls} calls, "
+                f"${mu.cost_usd(model_name):.4f}"
+            )
+    total_cost = getattr(llm_client, "total_cost_usd", 0.0)
+    console.print(f"[bold]Cost:[/bold] ${total_cost:.4f}")
     console.print(f"[bold]Duration:[/bold] {stats.duration_seconds:.1f}s")
 
 
@@ -85,6 +109,13 @@ def _print_final_stats(supervisor: Supervisor, llm_client: AnthropicClient) -> N
     help="Output formats.",
 )
 @click.option("--ghidra-dir", default=None, help="Ghidra installation directory.")
+@click.option(
+    "--provider", "-p",
+    type=click.Choice([p.value for p in LLMProvider], case_sensitive=False),
+    default=LLMProvider.ANTHROPIC.value,
+    help="LLM provider (anthropic or openai).",
+)
+@click.option("--model", "-m", default=None, help="Override the LLM model name.")
 @click.pass_context
 def analyze(
     ctx: click.Context,
@@ -93,10 +124,14 @@ def analyze(
     output: str,
     formats: tuple[str, ...],
     ghidra_dir: str | None,
+    provider: str,
+    model: str | None,
 ) -> None:
     """Analyze a binary with Kong's autonomous agent."""
+    llm_provider = LLMProvider(provider)
     config = KongConfig(
         ghidra=GhidraConfig(install_dir=ghidra_dir),
+        llm=LLMConfig(provider=llm_provider, model=model),
         output=OutputConfig(directory=Path(output), formats=list(formats)),
         headless=headless,
         verbose=ctx.obj["verbose"],
@@ -111,8 +146,8 @@ def analyze(
         formats=config.output.formats,
     )
 
-    if not check_api_key():
-        print_setup_needed(console)
+    if not check_api_key(llm_provider):
+        print_setup_needed(console, llm_provider)
         raise SystemExit(1)
 
     if not config.ghidra.install_dir:
@@ -140,7 +175,7 @@ def analyze(
     info = client.get_binary_info()
     console.print(f"[green]Loaded.[/green] {info.arch} {info.format} ({info.compiler})")
 
-    llm_client = AnthropicClient()
+    llm_client = create_llm_client(config.llm)
 
     def print_event(event: Event) -> None:
         style = {
@@ -169,7 +204,6 @@ def analyze(
             _print_final_stats(supervisor, llm_client)
             client.close()
     else:
-        # Deferred to avoid loading Textual when running --headless
         from kong.tui.app import KongApp
         app = KongApp(supervisor)
         try:
@@ -228,29 +262,28 @@ def setup() -> None:
     print_banner(console)
     console.print()
 
-    console.print("[bold]Step 1: Anthropic API Key[/bold]")
-    console.print()
+    from kong.banner import _ENV_VARS, _KEY_EXAMPLES, _KEY_URLS
 
-    current_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if current_key:
-        masked = current_key[:7] + "..." + current_key[-4:]
-        console.print(f"  [green]Found:[/green] {masked}")
-    else:
-        console.print("  [yellow]Not set.[/yellow]")
+    step = 1
+    for provider in LLMProvider:
+        env_var = _ENV_VARS[provider]
+        console.print(f"[bold]Step {step}: {provider.value.title()} API Key[/bold]")
         console.print()
-        console.print("  Get your key at: [bold]https://console.anthropic.com/settings/keys[/bold]")
-        console.print()
-        key = click.prompt("  Enter your API key", hide_input=True)
-        if not key.startswith("sk-ant-"):
-            console.print("  [red]Invalid key format. Keys start with sk-ant-[/red]")
-            raise SystemExit(1)
-        console.print()
-        console.print("  Add to your shell profile:")
-        console.print(f'  [bold]export ANTHROPIC_API_KEY="{key}"[/bold]')
-        os.environ["ANTHROPIC_API_KEY"] = key
 
-    console.print()
-    console.print("[bold]Step 2: Ghidra[/bold]")
+        current_key = os.environ.get(env_var, "")
+        if current_key:
+            masked = current_key[:7] + "..." + current_key[-4:]
+            console.print(f"  [green]Found:[/green] {masked}")
+        else:
+            console.print("  [yellow]Not set.[/yellow]")
+            console.print()
+            console.print(f"  Get your key at: [bold]{_KEY_URLS[provider]}[/bold]")
+            console.print(f"  [bold]export {env_var}={_KEY_EXAMPLES[provider]}[/bold]")
+
+        console.print()
+        step += 1
+
+    console.print(f"[bold]Step {step}: Ghidra[/bold]")
     console.print()
 
     ghidra_config = GhidraConfig()
@@ -266,7 +299,8 @@ def setup() -> None:
         console.print("  Then set [bold]GHIDRA_INSTALL_DIR[/bold] to the install path.")
 
     console.print()
-    all_good = check_api_key() and ghidra_config.install_dir
+    has_any_key = any(check_api_key(p) for p in LLMProvider)
+    all_good = has_any_key and ghidra_config.install_dir
     if all_good:
         console.print("[bold green]All set! Run [bold]kong analyze <binary>[/bold] to get started.[/bold green]")
     else:
