@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from kong.evals.harness import match_functions
+
 
 _SYNONYM_GROUPS: list[set[str]] = [
     {"search", "find", "lookup"},
@@ -189,7 +191,6 @@ def overall_score(
     truth: list[dict[str, str]],
 ) -> dict[str, float]:
     """Compute aggregate symbol and type accuracy across matched functions."""
-    from kong.evals.harness import match_functions
 
     matches = match_functions(predicted, truth)
 

@@ -253,6 +253,45 @@ class TestOpenAIToolUse:
         assert result.output_tokens == 60
         executor.execute.assert_called_once_with("simplify_expression", {"expression": "x + 0"})
 
+    @patch("kong.llm.openai_client.openai.OpenAI")
+    def test_max_rounds_exhausted_uses_last_content(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        tool_call = MagicMock()
+        tool_call.id = "call_abc"
+        tool_call.function.name = "lookup"
+        tool_call.function.arguments = '{"key": "val"}'
+
+        def make_tool_response(content: str | None):
+            resp = _mock_response("", prompt_tokens=50, completion_tokens=20)
+            resp.choices[0].finish_reason = "tool_calls"
+            resp.choices[0].message.content = content
+            resp.choices[0].message.tool_calls = [tool_call]
+            return resp
+
+        mock_client.chat.completions.create.side_effect = [
+            make_tool_response(None),
+            make_tool_response('{"name": "last_round", "confidence": 60}'),
+        ]
+
+        executor = MagicMock()
+        executor.execute.return_value = '{"result": "ok"}'
+
+        tools = [{
+            "name": "lookup",
+            "description": "Look up a value.",
+            "input_schema": {"type": "object", "properties": {"key": {"type": "string"}}},
+        }]
+
+        client = OpenAIClient(api_key="test-key")
+        result = client.analyze_with_tools("prompt", "system", tools, executor, max_rounds=2)
+
+        assert result.name == "last_round"
+        assert result.confidence == 60
+        assert result.input_tokens == 100
+        assert result.output_tokens == 40
+
 
 class TestConvertTools:
     def test_converts_anthropic_to_openai_format(self):

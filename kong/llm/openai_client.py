@@ -144,9 +144,9 @@ class OpenAIClient:
             self._record_usage(response, self.model)
 
             choice = response.choices[0]
+            last_text = choice.message.content or ""
 
             if choice.finish_reason != "tool_calls":
-                last_text = choice.message.content or ""
                 result = Analyzer.parse_llm_json(last_text)
                 result.input_tokens = total_input
                 result.output_tokens = total_output

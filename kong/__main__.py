@@ -19,6 +19,11 @@ from kong.config import GhidraConfig, KongConfig, LLMConfig, LLMProvider, Output
 from kong.evals.harness import score as eval_score
 from kong.ghidra.client import GhidraClient, GhidraClientError
 from kong.llm.usage import TokenUsage
+from kong.banner import _ENV_VARS, _KEY_EXAMPLES, _KEY_URLS
+from kong.llm.openai_client import OpenAIClient
+from kong.llm.client import AnthropicClient
+from kong.tui.app import KongApp
+
 
 if TYPE_CHECKING:
     from kong.agent.analyzer import LLMClient
@@ -37,9 +42,7 @@ def create_llm_client(config: LLMConfig) -> LLMClient:
     # will generalize further in the future
     model = config.model or _DEFAULT_MODELS[config.provider]
     if config.provider is LLMProvider.OPENAI:
-        from kong.llm.openai_client import OpenAIClient
         return OpenAIClient(model=model, api_key=config.api_key)
-    from kong.llm.client import AnthropicClient
     return AnthropicClient(model=model, api_key=config.api_key)
 
 
@@ -204,7 +207,6 @@ def analyze(
             _print_final_stats(supervisor, llm_client)
             client.close()
     else:
-        from kong.tui.app import KongApp
         app = KongApp(supervisor)
         try:
             app.run()
@@ -261,8 +263,6 @@ def setup() -> None:
     """Guided setup for Kong."""
     print_banner(console)
     console.print()
-
-    from kong.banner import _ENV_VARS, _KEY_EXAMPLES, _KEY_URLS
 
     step = 1
     for provider in LLMProvider:

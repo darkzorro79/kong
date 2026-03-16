@@ -19,6 +19,7 @@ from kong.agent.queue import WorkItem
 from kong.ghidra.client import GhidraClient
 from kong.ghidra.types import BinaryInfo, FunctionInfo, StringEntry, StructDefinition
 from kong.normalizer.syntactic import normalize
+from kong.agent.deobfuscator import classify_obfuscation
 
 if TYPE_CHECKING:
     from kong.agent.deobfuscator import Deobfuscator
@@ -171,7 +172,6 @@ class Analyzer:
         model: str | None = None,
     ) -> FunctionResult:
         """Full analysis pipeline for one function."""
-        from kong.agent.deobfuscator import classify_obfuscation
 
         func = item.function
         context = self._build_context(item, binary_info, known_results, strings, known_types)

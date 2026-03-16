@@ -12,6 +12,7 @@ from kong.llm.tools import (
     ToolCallRecord,
     ToolExecutor,
 )
+from kong.llm.client import AnthropicClient
 
 
 class TestToolSchemas:
@@ -135,7 +136,6 @@ class TestToolUseLoop:
         return msg
 
     def test_no_tool_calls(self):
-        from kong.llm.client import AnthropicClient
 
         json_response = json.dumps({
             "name": "simple_func",
@@ -163,7 +163,6 @@ class TestToolUseLoop:
             assert response.confidence == 85
 
     def test_single_tool_call(self):
-        from kong.llm.client import AnthropicClient
 
         json_response = json.dumps({
             "name": "deobfuscated_func",
@@ -198,7 +197,6 @@ class TestToolUseLoop:
             assert mock_client.messages.create.call_count == 2
 
     def test_max_rounds_limit(self):
-        from kong.llm.client import AnthropicClient
 
         tool_msg = self._mock_tool_use_message(
             "simplify_expression",

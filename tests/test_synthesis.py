@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import pytest
 
 from kong.agent.models import FunctionResult
-from kong.synthesis.semantic import SemanticSynthesizer, SynthesisResult
+from kong.synthesis.semantic import SemanticSynthesizer, SynthesisResult, SYNTHESIS_FUNCTION_CAP
 
 
 @dataclass
@@ -183,7 +183,6 @@ Trailing text'''
 
 class TestSynthesisCap:
     def test_synthesis_caps_at_50_functions(self) -> None:
-        from kong.synthesis.semantic import SYNTHESIS_FUNCTION_CAP
 
         results = [_make_result(i, f"func_{i}") for i in range(100)]
         decomps = {i: f"void func_{i}(void) {{ DAT_1000 = 1; }}" for i in range(100)}

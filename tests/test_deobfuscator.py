@@ -19,6 +19,11 @@ from kong.agent.deobfuscator import (
 )
 from kong.agent.models import FunctionResult
 from kong.ghidra.types import BinaryInfo, FunctionInfo
+from kong.agent.prompts import DEOBFUSCATION_SYSTEM_PROMPT
+from kong.llm.tools import DEOBFUSCATION_TOOLS
+from kong.agent.analyzer import Analyzer
+from kong.agent.queue import WorkItem
+from kong.agent.deobfuscator import Deobfuscator
 
 
 _CFF_CODE = """\
@@ -218,8 +223,6 @@ class TestDeobfuscator:
         assert "bogus_cf" in prompt
 
     def test_passes_deobfuscation_system_prompt(self, mock_ghidra, mock_llm):
-        from kong.agent.prompts import DEOBFUSCATION_SYSTEM_PROMPT
-
         deob = Deobfuscator(mock_ghidra, mock_llm)
         context = _make_context()
         deob.deobfuscate(context, [ObfuscationType.BOGUS_CONTROL_FLOW])
@@ -228,8 +231,6 @@ class TestDeobfuscator:
         assert system == DEOBFUSCATION_SYSTEM_PROMPT
 
     def test_passes_tools(self, mock_ghidra, mock_llm):
-        from kong.llm.tools import DEOBFUSCATION_TOOLS
-
         deob = Deobfuscator(mock_ghidra, mock_llm)
         context = _make_context()
         deob.deobfuscate(context, [ObfuscationType.INSTRUCTION_SUBSTITUTION])
@@ -240,9 +241,6 @@ class TestDeobfuscator:
 
 class TestAnalyzerDeobfuscationIntegration:
     def test_obfuscated_function_delegates(self):
-        from kong.agent.analyzer import Analyzer
-        from kong.agent.queue import WorkItem
-
         mock_ghidra = MagicMock()
         mock_ghidra.get_decompilation.return_value = _CFF_CODE
         mock_ghidra.get_xrefs_from.return_value = []
@@ -254,7 +252,6 @@ class TestAnalyzerDeobfuscationIntegration:
             classification="crypto",
         )
 
-        from kong.agent.deobfuscator import Deobfuscator
         deob = Deobfuscator(mock_ghidra, mock_llm)
 
         analyzer = Analyzer(mock_ghidra, mock_llm, deobfuscator=deob)
@@ -277,8 +274,6 @@ class TestAnalyzerDeobfuscationIntegration:
         mock_llm.analyze_with_tools.assert_called_once()
 
     def test_clean_function_uses_normal_path(self):
-        from kong.agent.analyzer import Analyzer
-        from kong.agent.queue import WorkItem
 
         mock_ghidra = MagicMock()
         mock_ghidra.get_decompilation.return_value = _CLEAN_CODE
@@ -291,7 +286,6 @@ class TestAnalyzerDeobfuscationIntegration:
             classification="math",
         )
 
-        from kong.agent.deobfuscator import Deobfuscator
         deob = Deobfuscator(mock_ghidra, mock_llm)
 
         analyzer = Analyzer(mock_ghidra, mock_llm, deobfuscator=deob)
