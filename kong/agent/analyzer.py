@@ -19,10 +19,12 @@ from kong.agent.queue import WorkItem
 from kong.ghidra.client import GhidraClient
 from kong.ghidra.types import BinaryInfo, FunctionInfo, StringEntry, StructDefinition
 from kong.normalizer.syntactic import normalize
+from kong.agent.deobfuscator import classify_obfuscation
 
 if TYPE_CHECKING:
     from kong.agent.deobfuscator import Deobfuscator
     from kong.llm.tools import ToolExecutor, ToolSchema
+    from kong.llm.usage import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,12 @@ def strip_markdown_fences(text: str) -> str:
 
 class LLMClient(Protocol):
     """Protocol for LLM interaction."""
+
+    model: str
+    usage: TokenUsage
+
+    @property
+    def total_cost_usd(self) -> float: ...
 
     def analyze_function(self, prompt: str, *, model: str | None = None) -> LLMResponse: ...
 
@@ -164,7 +172,6 @@ class Analyzer:
         model: str | None = None,
     ) -> FunctionResult:
         """Full analysis pipeline for one function."""
-        from kong.agent.deobfuscator import classify_obfuscation
 
         func = item.function
         context = self._build_context(item, binary_info, known_results, strings, known_types)

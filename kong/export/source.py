@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from kong.agent.models import FunctionResult
-from kong.agent.models import AnalysisStats
+from typing import TYPE_CHECKING
+
 from kong.ghidra.types import BinaryInfo
 from kong.llm.usage import TokenUsage
+
+if TYPE_CHECKING:
+    from kong.agent.models import AnalysisStats, FunctionResult
 
 SECTION_ORDER: list[tuple[str, str]] = [
     ("crypto", "Crypto"),

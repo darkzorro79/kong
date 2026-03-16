@@ -3,8 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+
 from kong.ghidra.environment import find_ghidra_install
+
+
+class LLMProvider(Enum):
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+
+    @property
+    def display_name(self) -> str:
+        return {LLMProvider.ANTHROPIC: "Anthropic", LLMProvider.OPENAI: "OpenAI"}[self]
 
 
 @dataclass
@@ -25,8 +36,16 @@ class OutputConfig:
 
 
 @dataclass
+class LLMConfig:
+    provider: LLMProvider = LLMProvider.ANTHROPIC
+    model: str | None = None
+    api_key: str | None = None
+
+
+@dataclass
 class KongConfig:
     ghidra: GhidraConfig = field(default_factory=GhidraConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     headless: bool = False
     verbose: bool = False

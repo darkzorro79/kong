@@ -27,6 +27,10 @@ from kong.ghidra.types import (
     StructDefinition,
     StructField,
 )
+from kong.agent.events import EventType
+from kong.agent.supervisor import Supervisor
+from kong.config import KongConfig, OutputConfig
+from kong.agent.queue import WorkItem
 
 
 def _field(name: str, dtype: str, offset: int, size: int) -> StructFieldProposal:
@@ -331,7 +335,6 @@ class TestAnalyzerContextTypes:
         )
         client.get_xrefs_from.return_value = []
 
-        from kong.agent.queue import WorkItem
         item = WorkItem(
             function=FunctionInfo(
                 address=0x1000, name="FUN_00001000", size=100,
@@ -374,7 +377,6 @@ class TestAnalyzerContextTypes:
         )
         client.get_xrefs_from.return_value = []
 
-        from kong.agent.queue import WorkItem
         item = WorkItem(
             function=FunctionInfo(
                 address=0x1000, name="f", size=100,
@@ -418,7 +420,6 @@ class TestAnalyzerStructProposalPassthrough:
         )
         client.get_xrefs_from.return_value = []
 
-        from kong.agent.queue import WorkItem
         item = WorkItem(
             function=FunctionInfo(
                 address=0x1000, name="f", size=100,
@@ -440,10 +441,6 @@ class TestAnalyzerStructProposalPassthrough:
 
 class TestSupervisorCleanupIntegration:
     def test_cleanup_with_struct_proposals(self, tmp_path):
-        from kong.agent.events import EventType, Phase
-        from kong.agent.supervisor import Supervisor
-        from kong.config import KongConfig, OutputConfig
-
         funcs = [
             FunctionInfo(
                 address=0x1000, name="process", size=100,
@@ -495,10 +492,6 @@ class TestSupervisorCleanupIntegration:
         assert EventType.CLEANUP_TYPE_CREATED in event_types
 
     def test_cleanup_without_struct_proposals(self, tmp_path):
-        from kong.agent.events import EventType
-        from kong.agent.supervisor import Supervisor
-        from kong.config import KongConfig, OutputConfig
-
         funcs = [
             FunctionInfo(
                 address=0x1000, name="f", size=100,
@@ -535,10 +528,7 @@ class TestSupervisorCleanupIntegration:
 
     def test_cleanup_retries_failed_signatures(self, tmp_path):
         """Signatures that fail during Phase 2 (type not yet created) get
-        retried after struct creation in cleanup."""
-        from kong.agent.events import EventType
-        from kong.agent.supervisor import Supervisor
-        from kong.config import KongConfig, OutputConfig
+        retried after struct creation in cleanup."""        
 
         funcs = [
             FunctionInfo(

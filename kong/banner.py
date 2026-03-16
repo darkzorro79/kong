@@ -10,6 +10,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from kong import __version__
+from kong.config import LLMProvider
 
 KONG_ASCII = r"""
  ██╗  ██╗ ██████╗ ███╗   ██╗ ██████╗
@@ -39,12 +40,33 @@ def print_banner(console: Console) -> None:
     ))
 
 
-def _load_dotenv() -> None:
-    """Load ANTHROPIC_API_KEY from .env if not already in the environment.
+_ENV_VARS: dict[LLMProvider, str] = {
+    LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+    LLMProvider.OPENAI: "OPENAI_API_KEY",
+}
+
+_KEY_EXAMPLES: dict[LLMProvider, str] = {
+    LLMProvider.ANTHROPIC: "sk-ant-...",
+    LLMProvider.OPENAI: "sk-...",
+}
+
+_KEY_URLS: dict[LLMProvider, str] = {
+    LLMProvider.ANTHROPIC: "https://console.anthropic.com/settings/keys",
+    LLMProvider.OPENAI: "https://platform.openai.com/api-keys",
+}
+
+
+def _env_var_for(provider: LLMProvider) -> str:
+    return _ENV_VARS[provider]
+
+
+def _load_dotenv(provider: LLMProvider) -> None:
+    """Load the API key for *provider* from .env if not already set.
 
     Checks cwd first, then the package root (two levels up from this file).
     """
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    env_var = _env_var_for(provider)
+    if os.environ.get(env_var):
         return
     package_root = Path(__file__).resolve().parent.parent
     for candidate in (Path.cwd() / ".env", package_root / ".env"):
@@ -54,27 +76,28 @@ def _load_dotenv() -> None:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            if line.startswith("ANTHROPIC_API_KEY="):
+            if line.startswith(f"{env_var}="):
                 value = line.split("=", 1)[1].strip().strip("\"'")
                 if value:
-                    os.environ["ANTHROPIC_API_KEY"] = value
+                    os.environ[env_var] = value
                 return
 
 
-def check_api_key() -> bool:
-    _load_dotenv()
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+def check_api_key(provider: LLMProvider) -> bool:
+    _load_dotenv(provider)
+    return bool(os.environ.get(_env_var_for(provider)))
 
 
-def print_setup_needed(console: Console) -> None:
+def print_setup_needed(console: Console, provider: LLMProvider = LLMProvider.ANTHROPIC) -> None:
+    env_var = _env_var_for(provider)
     console.print()
-    console.print("[bold red]ANTHROPIC_API_KEY is not set.[/bold red]")
+    console.print(f"[bold red]{env_var} is not set.[/bold red]")
     console.print()
-    console.print("Kong requires an Anthropic API key to analyze binaries.")
+    console.print(f"Kong requires a {provider.display_name} API key to analyze binaries.")
     console.print("Run [bold cyan]kong setup[/bold cyan] for guided configuration.")
     console.print()
     console.print("Or set it directly:")
-    console.print("  [bold]export ANTHROPIC_API_KEY=sk-ant-...[/bold]")
+    console.print(f"  [bold]export {env_var}={_KEY_EXAMPLES[provider]}[/bold]")
 
 
 def print_analyze_header(

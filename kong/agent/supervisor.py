@@ -23,15 +23,12 @@ from kong.export.source import ExportData, export_source
 from kong.export.structured import export_json
 from kong.ghidra.client import GhidraClient
 from kong.ghidra.types import BinaryInfo, FunctionInfo, StringEntry
+from kong.llm.limits import get_model_limits
 from kong.llm.usage import TokenUsage
 from kong.normalizer.syntactic import normalize
 from kong.synthesis.semantic import SemanticSynthesizer, SynthesisResult
 
 logger = logging.getLogger(__name__)
-
-OPUS_MODEL = "claude-opus-4-6"
-MAX_PROMPT_CHARS = 400_000
-MAX_CHUNK_FUNCTIONS = 120
 
 
 class Supervisor:
@@ -305,9 +302,12 @@ class Supervisor:
         """Split items into chunks by building the actual prompt and measuring size."""
         assert self.binary_info is not None
 
+        model_name = getattr(self.llm_client, "model", "") or ""
+        limits = get_model_limits(model_name)
+
         overhead = self._build_chunk_prompt([])
         overhead_len = len(overhead)
-        available = MAX_PROMPT_CHARS - overhead_len
+        available = limits.max_prompt_chars - overhead_len
 
         chunks: list[list[tuple[WorkItem, str]]] = []
         current_chunk: list[tuple[WorkItem, str]] = []
@@ -323,7 +323,7 @@ class Supervisor:
 
             chunk_full = (
                 current_chars + entry_len > available
-                or len(current_chunk) >= MAX_CHUNK_FUNCTIONS
+                or len(current_chunk) >= limits.max_chunk_functions
             )
             if current_chunk and chunk_full:
                 chunks.append(current_chunk)
@@ -385,7 +385,7 @@ class Supervisor:
 
             try:
                 responses = self.llm_client.analyze_function_batch(
-                    prompt, model=OPUS_MODEL,
+                    prompt, model=self.llm_client.model,
                 )
             except Exception as e:
                 logger.warning("Chunk %d/%d failed: %s", chunk_num, total_chunks, e)
@@ -502,7 +502,7 @@ class Supervisor:
             binary_info=self.binary_info,
             known_results=self.results,
             strings=self.strings,
-            model=OPUS_MODEL,
+            model=self.llm_client.model,
         )
 
         if result.obfuscation_techniques:
@@ -661,7 +661,7 @@ class Supervisor:
         synthesizer = SemanticSynthesizer(self.llm_client)
         try:
             synthesis_result = synthesizer.synthesize(
-                list(self.results.values()), decompilations, model=OPUS_MODEL,
+                list(self.results.values()), decompilations, model=self.llm_client.model,
             )
         except Exception as e:
             logger.warning("Synthesis failed: %s", e)
