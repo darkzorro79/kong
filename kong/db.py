@@ -58,6 +58,19 @@ def write_config(key: str, value: str) -> None:
         conn.close()
 
 
+def write_configs(pairs: dict[str, str]) -> None:
+    conn = _connect()
+    try:
+        conn.executemany(
+            "INSERT INTO config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            list(pairs.items()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def is_setup_complete() -> bool:
     return read_config("setup_complete") == "true"
 
@@ -86,6 +99,8 @@ def save_setup(
     enabled: list[LLMProvider],
     default: LLMProvider,
 ) -> None:
-    write_config("enabled_providers", json.dumps([p.value for p in enabled]))
-    write_config("default_provider", default.value)
-    write_config("setup_complete", "true")
+    write_configs({
+        "enabled_providers": json.dumps([p.value for p in enabled]),
+        "default_provider": default.value,
+        "setup_complete": "true",
+    })
