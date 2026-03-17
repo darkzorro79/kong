@@ -225,3 +225,28 @@ class TestSetupWizardCustom:
         assert LLMProvider.ANTHROPIC in enabled
         assert LLMProvider.OPENAI in enabled
         assert LLMProvider.CUSTOM not in enabled
+
+
+class TestCustomProviderIntegration:
+    @patch("kong.llm.probe.httpx.get")
+    @patch("kong.llm.openai_client.openai.OpenAI")
+    @patch("kong.config.find_ghidra_install", return_value=None)
+    def test_analyze_with_base_url_flag(
+        self, mock_ghidra, mock_openai_cls, mock_probe, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KONG_CONFIG_DIR", str(tmp_path))
+        save_setup(enabled=[LLMProvider.CUSTOM], default=LLMProvider.CUSTOM)
+        mock_probe.return_value = MagicMock(status_code=200, json=lambda: {"data": []})
+
+        binary = tmp_path / "test_binary"
+        binary.write_bytes(b"\x00" * 16)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "analyze", str(binary),
+            "--base-url", "http://localhost:11434/v1",
+            "--model", "llama3:8b",
+            "--headless",
+        ])
+
+        assert "not installed" in result.output.lower() or "not found" in result.output.lower()
