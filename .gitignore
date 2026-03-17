@@ -219,3 +219,7 @@ __marimo__/
 
 #internal testing
 internal-testing/
+
+.DS_Store
+
+docs/
