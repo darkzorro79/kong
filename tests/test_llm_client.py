@@ -292,15 +292,19 @@ class TestProviderAwarePricing:
         from kong.llm.usage import PRICING_REGISTRY, get_pricing, register_custom_model
 
         register_custom_model("my-local-llama")
-        tier = get_pricing("my-local-llama")
-        assert tier.input_rate == 0.0
-        assert tier.output_rate == 0.0
-        del PRICING_REGISTRY["my-local-llama"]
+        try:
+            tier = get_pricing("my-local-llama")
+            assert tier.input_rate == 0.0
+            assert tier.output_rate == 0.0
+        finally:
+            PRICING_REGISTRY.pop("my-local-llama", None)
 
     def test_cost_usd_zero_for_registered_custom_model(self):
         from kong.llm.usage import PRICING_REGISTRY, ModelTokenUsage, register_custom_model
 
         register_custom_model("test-custom-model")
-        mu = ModelTokenUsage(input_tokens=1_000_000, output_tokens=1_000_000)
-        assert mu.cost_usd("test-custom-model") == 0.0
-        del PRICING_REGISTRY["test-custom-model"]
+        try:
+            mu = ModelTokenUsage(input_tokens=1_000_000, output_tokens=1_000_000)
+            assert mu.cost_usd("test-custom-model") == 0.0
+        finally:
+            PRICING_REGISTRY.pop("test-custom-model", None)
