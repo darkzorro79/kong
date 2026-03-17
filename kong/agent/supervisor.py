@@ -766,6 +766,7 @@ class Supervisor:
             decompilations=decompilations,
             token_usage=token_usage,
             duration_seconds=self.stats.duration_seconds,
+            provider=self.config.llm.provider,
         )
 
         formats = self.config.output.formats
