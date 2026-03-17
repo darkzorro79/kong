@@ -237,6 +237,34 @@ class TestAnalyzeFunctionBatch:
         assert client.usage.calls == 1
 
 
+class TestOpenAIClientBaseUrl:
+    @patch("kong.llm.openai_client.openai.OpenAI")
+    def test_base_url_passed_to_sdk(self, mock_openai_cls):
+        from kong.llm.openai_client import OpenAIClient
+
+        OpenAIClient(
+            model="llama3:8b",
+            base_url="http://localhost:11434/v1",
+            api_key="test",
+        )
+        mock_openai_cls.assert_called_once_with(
+            api_key="test",
+            base_url="http://localhost:11434/v1",
+            max_retries=5,
+        )
+
+    @patch("kong.llm.openai_client.openai.OpenAI")
+    def test_base_url_none_by_default(self, mock_openai_cls):
+        from kong.llm.openai_client import OpenAIClient
+
+        OpenAIClient(model="gpt-4o", api_key="sk-test")
+        mock_openai_cls.assert_called_once_with(
+            api_key="sk-test",
+            base_url=None,
+            max_retries=5,
+        )
+
+
 class TestProviderAwarePricing:
     def test_custom_provider_returns_zero_pricing(self):
         from kong.config import LLMProvider
