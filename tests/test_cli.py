@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 import click
 
-from kong.__main__ import cli, create_llm_client, resolve_provider, validate_base_url
+from kong.__main__ import _NOT_NEEDED_STR, cli, create_llm_client, resolve_provider, validate_base_url
 from kong.config import LLMConfig, LLMProvider
 from kong.db import get_custom_config, save_setup
 
@@ -127,7 +127,7 @@ class TestCreateLLMClient:
         client = create_llm_client(config)
         assert isinstance(client, OpenAIClient)
         mock_openai_cls.assert_called_once_with(
-            api_key="not-needed",
+            api_key=_NOT_NEEDED_STR,
             base_url="http://localhost:11434/v1",
             max_retries=5,
         )
