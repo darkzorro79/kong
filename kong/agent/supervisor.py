@@ -301,9 +301,9 @@ class Supervisor:
         if cfg.provider is not LLMProvider.CUSTOM:
             return base
         return ModelLimits(
-            max_prompt_chars=cfg.max_prompt_chars or base.max_prompt_chars,
-            max_chunk_functions=cfg.max_chunk_functions or base.max_chunk_functions,
-            max_output_tokens=cfg.max_output_tokens or base.max_output_tokens,
+            max_prompt_chars=cfg.max_prompt_chars if cfg.max_prompt_chars is not None else base.max_prompt_chars,
+            max_chunk_functions=cfg.max_chunk_functions if cfg.max_chunk_functions is not None else base.max_chunk_functions,
+            max_output_tokens=cfg.max_output_tokens if cfg.max_output_tokens is not None else base.max_output_tokens,
         )
 
     def _split_into_chunks(

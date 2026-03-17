@@ -242,9 +242,12 @@ def analyze(
         if not base_url:
             console.print("[red]--base-url is required for custom provider[/red]")
             raise SystemExit(1)
-        max_prompt_chars = max_prompt_chars or _int_or_none(custom_db.get("custom_max_prompt_chars"))
-        max_chunk_functions = max_chunk_functions or _int_or_none(custom_db.get("custom_max_chunk_functions"))
-        max_output_tokens = max_output_tokens or _int_or_none(custom_db.get("custom_max_output_tokens"))
+        if max_prompt_chars is None:
+            max_prompt_chars = _int_or_none(custom_db.get("custom_max_prompt_chars"))
+        if max_chunk_functions is None:
+            max_chunk_functions = _int_or_none(custom_db.get("custom_max_chunk_functions"))
+        if max_output_tokens is None:
+            max_output_tokens = _int_or_none(custom_db.get("custom_max_output_tokens"))
 
     config = KongConfig(
         ghidra=GhidraConfig(install_dir=ghidra_dir),
