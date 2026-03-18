@@ -400,11 +400,22 @@ def setup() -> None:
     from kong.llm.limits import _DEFAULT_LIMITS
     from kong.llm.probe import probe_endpoint
 
+    current_default = get_default_provider()
+    current_enabled = get_enabled_providers()
+    saved_custom = get_custom_config()
+
+    def _current_marker(provider: LLMProvider) -> str:
+        if provider == current_default:
+            return " [green](current default)[/green]"
+        if provider in current_enabled:
+            return " [cyan](enabled)[/cyan]"
+        return ""
+
     console.print("[bold]Step 1:[/bold] Which LLM providers would you like to use?")
     console.print()
-    console.print("  [bold]1[/bold]) Anthropic (Claude)")
-    console.print("  [bold]2[/bold]) OpenAI (GPT-4o)")
-    console.print("  [bold]3[/bold]) Custom endpoint (OpenAI-compatible)")
+    console.print(f"  [bold]1[/bold]) Anthropic (Claude){_current_marker(LLMProvider.ANTHROPIC)}")
+    console.print(f"  [bold]2[/bold]) OpenAI (GPT-4o){_current_marker(LLMProvider.OPENAI)}")
+    console.print(f"  [bold]3[/bold]) Custom endpoint (OpenAI-compatible){_current_marker(LLMProvider.CUSTOM)}")
     console.print("  [bold]4[/bold]) Anthropic + OpenAI")
     console.print()
 
@@ -422,31 +433,39 @@ def setup() -> None:
         enabled = [LLMProvider.ANTHROPIC, LLMProvider.OPENAI]
 
     if LLMProvider.CUSTOM in enabled:
+        saved_url = saved_custom.get("custom_base_url", "")
+        saved_model = saved_custom.get("custom_model", "")
+        saved_key = saved_custom.get("custom_api_key", "")
+        saved_max_pc = saved_custom.get("custom_max_prompt_chars", str(_DEFAULT_LIMITS.max_prompt_chars))
+        saved_max_cf = saved_custom.get("custom_max_chunk_functions", str(_DEFAULT_LIMITS.max_chunk_functions))
+        saved_max_ot = saved_custom.get("custom_max_output_tokens", str(_DEFAULT_LIMITS.max_output_tokens))
+
         console.print()
         console.print("[bold]Step 2:[/bold] Configure custom endpoint")
         console.print()
-        console.print("  Examples:", style="dim")
-        console.print("    http://localhost:11434/v1      (Ollama)", style="dim")
-        console.print("    http://localhost:8000/v1       (vLLM)", style="dim")
-        console.print("    https://openrouter.ai/api/v1  (OpenRouter)", style="dim")
-        console.print()
-        custom_base_url = Prompt.ask("  Endpoint URL", console=console)
+        if not saved_url:
+            console.print("  Examples:", style="dim")
+            console.print("    http://localhost:11434/v1      (Ollama)", style="dim")
+            console.print("    http://localhost:8000/v1       (vLLM)", style="dim")
+            console.print("    https://openrouter.ai/api/v1  (OpenRouter)", style="dim")
+            console.print()
+        custom_base_url = Prompt.ask("  Endpoint URL", default=saved_url or None, console=console)
         custom_base_url = validate_base_url(custom_base_url)
-        custom_model = Prompt.ask("  Model name", console=console)
-        custom_api_key = Prompt.ask("  API key (leave blank for none)", default="", console=console)
+        custom_model = Prompt.ask("  Model name", default=saved_model or None, console=console)
+        custom_api_key = Prompt.ask("  API key (leave blank for none)", default=saved_key, console=console)
         custom_max_pc = Prompt.ask(
             "  Max prompt size (chars)",
-            default=str(_DEFAULT_LIMITS.max_prompt_chars),
+            default=saved_max_pc,
             console=console,
         )
         custom_max_cf = Prompt.ask(
             "  Max functions per batch",
-            default=str(_DEFAULT_LIMITS.max_chunk_functions),
+            default=saved_max_cf,
             console=console,
         )
         custom_max_ot = Prompt.ask(
             "  Max output tokens",
-            default=str(_DEFAULT_LIMITS.max_output_tokens),
+            default=saved_max_ot,
             console=console,
         )
         custom_config = {
