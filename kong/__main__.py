@@ -425,6 +425,11 @@ def setup() -> None:
         console.print()
         console.print("[bold]Step 2:[/bold] Configure custom endpoint")
         console.print()
+        console.print("  Examples:", style="dim")
+        console.print("    http://localhost:11434/v1      (Ollama)", style="dim")
+        console.print("    http://localhost:8000/v1       (vLLM)", style="dim")
+        console.print("    https://openrouter.ai/api/v1  (OpenRouter)", style="dim")
+        console.print()
         custom_base_url = Prompt.ask("  Endpoint URL", console=console)
         custom_base_url = validate_base_url(custom_base_url)
         custom_model = Prompt.ask("  Model name", console=console)
@@ -454,6 +459,7 @@ def setup() -> None:
         }
 
         console.print()
+        console.print("  Probing endpoint...")
         probe_cfg = LLMConfig(
             provider=LLMProvider.CUSTOM,
             base_url=custom_base_url,
